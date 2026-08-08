@@ -1110,7 +1110,9 @@ def _validate_env_id_candidate_functions(declarations: list[V2Declaration]) -> l
     for declaration in declarations:
         if declaration.kind not in {"env_candidates", "env_cleanup_candidates"}:
             continue
-        if declaration.target_kind == "function":
+        if declaration.kind == "env_candidates" and declaration.target_kind in {"function", "async_function"}:
+            continue
+        if declaration.kind == "env_cleanup_candidates" and declaration.target_kind == "function":
             continue
         label = "env cleanup candidates" if declaration.kind == "env_cleanup_candidates" else "env candidates"
         code = (
@@ -1122,7 +1124,11 @@ def _validate_env_id_candidate_functions(declarations: list[V2Declaration]) -> l
             V2Diagnostic(
                 code=code,
                 location=declaration.symbol,
-                message=f"{label} must decorate a pure sync function",
+                message=(
+                    f"{label} must decorate a pure sync function"
+                    if declaration.kind == "env_cleanup_candidates"
+                    else f"{label} must decorate a sync or async function"
+                ),
             )
         )
     return diagnostics

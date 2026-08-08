@@ -143,7 +143,7 @@ MODEL_PROJECT_README = """# {display_name}
 - `tasks/`: 页面操作函数，使用 `@page_action`。
 - `data/`: 数据表与只读视图声明，使用 `@data_table` / `@data_view`。
 - `pages/`: Hosted UI 页面；可以平铺在 `pages/*.py`，也可以按单层业务分组放到 `pages/<group>/*.py`。
-- `candidates/`: 环境候选纯函数，使用 `@env_candidates`。
+- `candidates/`: 同步或异步环境候选函数，使用 `@env_candidates`。
 - `cleanups/`: 环境清理候选纯函数，使用 `@env_cleanup_candidates`。
 - `.crawler4j/manifest.lock.json`: SDK 扫描生成的 v2 manifest lock。
 
@@ -194,7 +194,7 @@ uv run crawler4j package build
 - 对象依赖和 component 参数可以写在装饰器参数里，也可以写成 `Annotated[..., object_inject(...)]` / `Annotated[..., object_param(...)]`。
 - `object_param(...)` 支持标量、enum、array、object、json、date/datetime/time、url、path、secret，并可从常见 Python 注解推断类型。
 - 表与只读视图统一由装饰器声明；旧 `module.yaml.data` 已不再是 0.4.x 运行契约；快照表需显式 `--storage-mode managed_dataset`。
-- 环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步纯函数，不使用资源池同步或旧 `env_selectors/`。
+- 环境选择统一写成 `candidates/` 下的 `@env_candidates` 同步或异步只读函数，不使用资源池同步或旧 `env_selectors/`。
 - 批量环境清理由 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数声明；模块只返回已绑定且业务上可丢弃的 env id，删除由宿主环境管理页确认后执行。
 - 模块不要导入 `TaskSignal` / `EnvAction`；流程终态用 `TaskResult` 表达，任务结束、失败、超时或被用户中止后的环境统一由宿主回收。
 - workflow/component 可选实现 `setup(ctx, workflow)` 做运行前准备，可选实现 `cleanup(ctx, outcome)` 做终态收尾；旧 `aclose()` / `close()` 不再是对象生命周期契约。

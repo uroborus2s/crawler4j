@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from crawler4j_contracts import Crawler4jMeta, EnvCandidateResult
 from src.core.atm.execution_runner import ExecutionRequest, ExecutionRunner
 from src.core.atm.models import Task, TaskStatus
 from src.core.atm.run_profile import AcquisitionMode
@@ -19,6 +20,8 @@ from src.core.rem.fingerprint_validation import (
     FINGERPRINT_VALIDATION_STATUS,
 )
 from src.core.rem.models import Environment, EnvKind, EnvLease, EnvStatus, EnvUnavailableError
+from src.core.mms.runtime_descriptor import ModuleRuntimeDescriptorV2, V2RuntimeEntry
+from src.core.mms.service import ModuleService
 
 
 @pytest.fixture(autouse=True)
@@ -143,6 +146,21 @@ async def test_execution_runner_waits_when_env_candidates_return_empty():
     assert request.task.status == TaskStatus.PENDING
     assert request.task.error == ""
     assert request.task.message == "等待环境候选可用: bound_account_ready"
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_discards_context_when_structured_candidates_are_empty():
+    request = _build_request()
+    module_service = _candidate_service(
+        EnvCandidateResult(candidates=[], context={"city": "上海"})
+    )
+    runner, _rem = _build_runner(env=None, lease=None, module_service=module_service)
+
+    result = await runner.run(request)
+
+    assert result.task_context is None
+    module_service.run_module.assert_not_awaited()
+    assert request.task.status == TaskStatus.PENDING
 
 
 @pytest.mark.asyncio
@@ -327,7 +345,7 @@ async def test_execution_runner_requeues_when_selected_env_is_taken(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_execution_runner_requeues_when_candidate_function_excludes_env_after_lease(monkeypatch):
+async def test_execution_runner_does_not_recompute_candidates_after_lease(monkeypatch):
     import src.core.atm.execution_runner as execution_runner
 
     request = _build_request()
@@ -337,16 +355,123 @@ async def test_execution_runner_requeues_when_candidate_function_excludes_env_af
     module_service = _candidate_service([21], [])
     runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
     await _seed_claim(rem, 21, "demo.module")
-    monkeypatch.setattr(execution_runner, "is_env_bound_by_module", lambda *_args, **_kwargs: True)
+    binding_check = Mock(return_value=True)
+    monkeypatch.setattr(execution_runner, "is_env_bound_by_module", binding_check)
+    runner._is_env_fingerprint_validation_risk = AsyncMock(return_value=False)
     monkeypatch.setattr(execution_runner.time, "time", lambda: 1_710_000_190)
 
     await runner.run(request)
 
+    assert module_service.resolve_env_candidates.call_count == 1
+    assert binding_check.call_count == 2
+    assert runner._is_env_fingerprint_validation_risk.await_count == 2
+    assert rem.list_metadata.await_count == 2
     rem.list_envs.assert_awaited_once()
     rem.lease_manager.acquire.assert_awaited_once_with(env, request.task.id, timeout=60)
     rem.release.assert_awaited_once_with(lease)
+    module_service.run_module.assert_awaited_once()
+    assert request.task.status == TaskStatus.SUCCEEDED
+    assert request.task.error == ""
+    assert request.task.waiting_since is None
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_releases_and_requeues_when_host_binding_fails_after_lease(monkeypatch):
+    import src.core.atm.execution_runner as execution_runner
+
+    request = _build_request()
+    request.task.waiting_since = 1_710_000_090
+    env, lease = _build_env()
+    module_service = _candidate_service([21])
+    runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
+    await _seed_claim(rem, 21, "demo.module")
+    binding_check = Mock(side_effect=[True, False])
+    monkeypatch.setattr(execution_runner, "is_env_bound_by_module", binding_check)
+    runner._is_env_fingerprint_validation_risk = AsyncMock(return_value=False)
+
+    await runner.run(request)
+
+    assert module_service.resolve_env_candidates.call_count == 1
+    assert binding_check.call_count == 2
+    assert runner._is_env_fingerprint_validation_risk.await_count == 2
+    assert rem.list_metadata.await_count == 2
+    rem.release.assert_awaited_once_with(lease)
     module_service.run_module.assert_not_awaited()
     assert request.task.status == TaskStatus.PENDING
-    assert request.task.error == ""
     assert request.task.message == "等待环境候选可用: bound_account_ready"
-    assert request.task.waiting_since == 1_710_000_090
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_injects_same_structured_candidate_context_into_selected_workflow(monkeypatch):
+    import src.core.atm.execution_runner as execution_runner
+
+    request = _build_request()
+    env, lease = _build_env()
+    candidate_context = {"city": "上海", "task_count": 61}
+    module_service = _candidate_service(
+        EnvCandidateResult(candidates=[21], context=candidate_context)
+    )
+    runner, rem = _build_runner(env=env, lease=lease, module_service=module_service)
+    await _seed_claim(rem, 21, "demo.module")
+    monkeypatch.setattr(execution_runner, "is_env_bound_by_module", lambda *_args, **_kwargs: True)
+
+    result = await runner.run(request)
+
+    assert module_service.resolve_env_candidates.call_count == 1
+    assert result.task_context is not None
+    assert result.task_context.candidate_context == candidate_context
+    workflow_context = module_service.run_module.await_args.args[1]
+    assert workflow_context.candidate_context == candidate_context
+    assert request.task.status == TaskStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_keeps_candidate_exception_in_resource_failure_semantics():
+    request = _build_request()
+    module_service = _candidate_service([])
+    module_service.resolve_env_candidates.side_effect = RuntimeError("candidate failed")
+    runner, rem = _build_runner(env=None, lease=None, module_service=module_service)
+
+    await runner.run(request)
+
+    rem.list_envs.assert_not_awaited()
+    module_service.run_module.assert_not_awaited()
+    assert request.task.status == TaskStatus.FAILED
+    assert request.task.error == "Resource Error: candidate failed"
+
+
+@pytest.mark.asyncio
+async def test_execution_runner_does_not_log_or_store_rejected_candidate_context(monkeypatch):
+    import src.core.atm.execution_runner as execution_runner
+
+    secret = "candidate-secret-sentinel"
+    request = _build_request()
+    async def candidates():
+        return EnvCandidateResult(
+            candidates=[21],
+            context={"secret": secret, "invalid": object()},
+        )
+
+    module_service = ModuleService()
+    module_service._load_descriptor_v2 = Mock(  # type: ignore[method-assign]
+        return_value=ModuleRuntimeDescriptorV2(
+            env_candidates={
+                "bound_account_ready": V2RuntimeEntry(
+                    meta=Crawler4jMeta(kind="env_candidates", name="bound_account_ready"),
+                    target=candidates,
+                    module_name="demo.module.candidates.ready",
+                    attr_name="candidates",
+                    owner="candidates/ready.py",
+                )
+            }
+        )
+    )
+    runner, _rem = _build_runner(env=None, lease=None, module_service=module_service)
+    warning = Mock()
+    monkeypatch.setattr(execution_runner.logger, "warning", warning)
+
+    await runner.run(request)
+
+    logged = " ".join(str(call) for call in warning.call_args_list)
+    assert secret not in request.task.error
+    assert secret not in logged

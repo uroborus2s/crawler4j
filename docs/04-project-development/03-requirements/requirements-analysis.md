@@ -19,7 +19,7 @@
 | `REQ-006` | 模块运行能力由 Core 扫描托管 | 满足 | 0.4.0 已切到 `core-native-v2`，运行能力事实源来自 `tasks/`、`workflows/`、`candidates/`、`cleanups/`、`pages/` 等装饰器扫描；旧 `hooks/` 不再是运行契约，旧模块升级路径统一为按最新模板重新初始化 |
 | `REQ-007` | 宿主生命周期与环境处置边界 | 已替代旧信号方案 | 0.4.0 当前实现已删除模块 `TaskSignal` / `EnvAction` 入口；workflow 只返回 `TaskResult`，对象可选实现 `setup(ctx, workflow)` 与 `cleanup(ctx, outcome)`，任务终态环境统一回收 |
 | `REQ-008` | 模块审计事件独立存储 | 本次完成 | 宿主已新增 `module_audit_events` 与 `ctx.db.audit(...).append/query`，快照 dataset 继续保留原语义 |
-| `REQ-009` | 环境候选 Service Job 等待队列 | 本次完成 | 当前宿主已实现 `@env_candidates` 候选纯函数实时求值、`PENDING` 等待、FIFO 补位、模块环境授权、租约后复核和等待席位自动超时收口；资源池同步方案已退出正式契约 |
+| `REQ-009` | 环境候选 Service Job 等待队列 | 本次完成 | 当前宿主已实现同步/异步 `@env_candidates` 单次求值、结构化 context、`PENDING` 等待、FIFO 补位、模块环境授权、租约后宿主复核和等待席位自动超时收口；资源池同步方案已退出正式契约 |
 | `REQ-010` | Hosted UI 宿主托管批量导入 | 已实现 | 已完成 `API-019` / `TASK-030` 到 `TASK-034`：Contracts / SDK 支持 toolbar 导入契约，Core 宿主解析 `.xlsx/.csv`、剪贴板和手工 JSON，Hosted UI 可分发给 `@ui_action` 或 workflow 并展示批次结果 |
 | `REQ-004` | 发布与文档链路可追溯 | 满足 | 根应用工作区版本、运行时版本服务、最近正式 tag 与 release 文档口径已明确分层 |
 | `REQ-005` | 软件工厂治理基线存在 | 本次建立 | `AGENTS.md`、`GEMINI.md`、`.factory/`、编号文档已新增 |
@@ -46,7 +46,7 @@
 
 - 0.4.0 已切到 `core-native-v2`，运行能力事实源来自装饰器扫描和 manifest lock，不再由根 `__init__.py`、`ModuleAssembler` 或 `module_runtime.py` 承载。
 - 默认工作流解析顺序稳定为 `ctx.runtime["workflow"] -> 单 workflow 自动选择 -> main_workflow`。
-- 环境选择能力通过 `candidates/*.py` 中的 `@env_candidates` 同步纯函数声明；ATM“选择环境”模式只接受固定 `env_id` 或候选函数名。
+- 环境选择能力通过 `candidates/*.py` 中同步或异步的 `@env_candidates` 只读函数声明；ATM“选择环境”模式只接受固定 `env_id` 或候选函数名。
 - 本轮不再把“兼容旧模块模板”作为目标，旧模块升级路径统一为按 0.4.0 脚手架重新初始化。
 
 ### `REQ-007`
@@ -67,11 +67,11 @@
 
 - 当前 0.4.0 已把候选 Service Job 中“当前轮没命中环境”的核心语义从硬失败收敛为等待，并由宿主按 `wait_timeout` 对长期等待席位做自动超时收口。
 - 当目标并发大于当前可用候选环境数时，宿主现已能把容量不足收敛为稳定候场队列，而不是制造失败风暴和反复补单。
-- 当前实现边界是：宿主维护等待席位、环境授权、租约和 FIFO 补位；模块只维护业务数据表和 `@env_candidates` 候选纯函数。
+- 当前实现边界是：宿主维护等待席位、环境授权、租约和 FIFO 补位；模块只维护业务数据表和 `@env_candidates` 候选函数。
 - 该需求的核心不是“再起更多模块实例”，而是把并发目标收敛为服务席位，把资源不足收敛为“等待环境”这一条正式业务状态。
-- 当前 REM 分配入口不再维护模块资源池资格快照；ATM 每次调度通过 MMS 执行当前模块声明的 `@env_candidates` 同步纯函数，并在候选结果上叠加“已绑定当前模块 + `READY` + 浏览器 + 未租约占用”的宿主约束。
+- 当前 REM 分配入口不再维护模块资源池资格快照；ATM 每次选择通过 MMS 执行当前模块声明的同步或异步 `@env_candidates` 一次，并在候选结果上叠加“已绑定当前模块 + `READY` + 浏览器 + 未租约占用”的宿主约束。
 - 黑号/封禁、账号注册时间、会员等级等业务状态由模块写入自身数据表，候选函数实时读取这些数据并返回可用 env id 列表或 `EnvCandidates` 链式查询结果；不引入资源池同步工作流。
-- 这轮不让宿主读取模块私有业务表，也不让模块同步宿主资源池快照；唯一边界是模块纯函数产出候选集合，宿主负责授权、租约、FIFO 等待与超时收口。
+- 这轮不让宿主读取模块私有业务表，也不让模块同步宿主资源池快照；唯一边界是模块候选函数产出候选集合与可选 context，宿主负责校验、授权、租约、FIFO 等待与超时收口。
 
 ### `REQ-010`
 

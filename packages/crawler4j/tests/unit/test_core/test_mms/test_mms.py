@@ -1,10 +1,12 @@
 """MMS 数据模型单元测试。"""
 
+import asyncio
 import time
+from unittest.mock import Mock
 
 import pytest
 
-from crawler4j_contracts import Crawler4jMeta, TaskContext, TaskResult
+from crawler4j_contracts import Crawler4jMeta, EnvCandidateResult, TaskContext, TaskResult
 
 from src.core.mms.models import (
     ConfigDefaultsInfo,
@@ -182,23 +184,216 @@ def test_env_cleanup_candidates_invoke_uses_same_keyword_binding():
     assert result == [43, 100]
 
 
+def _service_with_env_candidates(target) -> ModuleService:
+    service = ModuleService()
+    service._load_descriptor_v2 = Mock(  # type: ignore[method-assign]
+        return_value=ModuleRuntimeDescriptorV2(
+            env_candidates={
+                "ready_accounts": V2RuntimeEntry(
+                    meta=Crawler4jMeta(kind="env_candidates", name="ready_accounts"),
+                    target=target,
+                    module_name="demo_module.candidates.ready_accounts",
+                    attr_name="ready_accounts",
+                    owner="candidates/ready_accounts.py",
+                )
+            }
+        )
+    )
+    return service
+
+
+def test_resolve_env_candidates_sync_preserves_legacy_list_result():
+    service = _service_with_env_candidates(lambda: [21, 22])
+
+    assert service.resolve_env_candidates(
+        "demo_module",
+        TaskContext(env_id=0, task_name="demo_module"),
+        "ready_accounts",
+    ) == [21, 22]
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_candidates_async_awaits_once_and_preserves_context():
+    calls = 0
+
+    async def ready_accounts():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        return EnvCandidateResult(
+            candidates=[21],
+            context={"city": "上海", "task_count": 61},
+        )
+
+    service = _service_with_env_candidates(ready_accounts)
+
+    result = await service.resolve_env_candidates_async(
+        "demo_module",
+        TaskContext(env_id=0, task_name="demo_module"),
+        "ready_accounts",
+    )
+
+    assert calls == 1
+    assert result == EnvCandidateResult(
+        candidates=[21],
+        context={"city": "上海", "task_count": 61},
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_candidates_async_awaits_sync_returned_awaitable_once():
+    calls = 0
+
+    async def result():
+        await asyncio.sleep(0)
+        return [21]
+
+    def ready_accounts():
+        nonlocal calls
+        calls += 1
+        return result()
+
+    service = _service_with_env_candidates(ready_accounts)
+
+    resolved = await service.resolve_env_candidates_async(
+        "demo_module",
+        TaskContext(env_id=0, task_name="demo_module"),
+        "ready_accounts",
+    )
+
+    assert calls == 1
+    assert resolved == [21]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("context", "message"),
+    [
+        ({"token": object()}, "JSON-safe"),
+        ({1: "value"}, "JSON-safe"),
+        ({"value": (1, 2)}, "JSON-safe"),
+        ({"payload": "x" * (64 * 1024)}, "64 KiB"),
+        ({"score": float("nan")}, "JSON-safe"),
+        ({"score": float("inf")}, "JSON-safe"),
+        ({"score": float("-inf")}, "JSON-safe"),
+    ],
+)
+async def test_resolve_env_candidates_rejects_invalid_or_oversized_context_without_echoing_value(
+    context,
+    message,
+):
+    service = _service_with_env_candidates(
+        lambda: EnvCandidateResult(candidates=[21], context=context)
+    )
+
+    with pytest.raises(RuntimeError, match=message) as exc_info:
+        await service.resolve_env_candidates_async(
+            "demo_module",
+            TaskContext(env_id=0, task_name="demo_module"),
+            "ready_accounts",
+        )
+
+    assert "token" not in str(exc_info.value)
+    assert "payload" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_candidates_accepts_exact_64_kib_and_multibyte_json_context():
+    exact_context = "界" * 21844 + "xx"
+    exact_service = _service_with_env_candidates(
+        lambda: EnvCandidateResult(candidates=[21], context=exact_context)
+    )
+    oversized_service = _service_with_env_candidates(
+        lambda: EnvCandidateResult(candidates=[21], context="界" * 21845)
+    )
+
+    exact_result = await exact_service.resolve_env_candidates_async(
+        "demo_module",
+        TaskContext(env_id=0, task_name="demo_module"),
+        "ready_accounts",
+    )
+    with pytest.raises(RuntimeError, match="64 KiB"):
+        await oversized_service.resolve_env_candidates_async(
+            "demo_module",
+            TaskContext(env_id=0, task_name="demo_module"),
+            "ready_accounts",
+        )
+
+    assert exact_result == EnvCandidateResult(candidates=[21], context=exact_context)
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_candidates_rejects_circular_context_without_sensitive_content():
+    secret = "candidate-secret-sentinel"
+    circular = [{"secret": secret}]
+    circular.append(circular)
+    service = _service_with_env_candidates(
+        lambda: EnvCandidateResult(candidates=[21], context=circular)
+    )
+
+    with pytest.raises(RuntimeError, match="JSON-safe") as exc_info:
+        await service.resolve_env_candidates_async(
+            "demo_module",
+            TaskContext(env_id=0, task_name="demo_module"),
+            "ready_accounts",
+        )
+
+    assert secret not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_candidates_async_preserves_provider_exception():
+    async def broken():
+        raise RuntimeError("candidate failed")
+
+    service = _service_with_env_candidates(broken)
+
+    with pytest.raises(RuntimeError, match="candidate failed"):
+        await service.resolve_env_candidates_async(
+            "demo_module",
+            TaskContext(env_id=0, task_name="demo_module"),
+            "ready_accounts",
+        )
+
+
 @pytest.mark.asyncio
 async def test_resolve_env_candidates_async_times_out_without_blocking_loop():
-    service = ModuleService()
-
-    def slow_resolve(*_args, **_kwargs):
+    def slow_resolve():
         time.sleep(0.2)
         return [1]
 
-    service.resolve_env_candidates = slow_resolve  # type: ignore[method-assign]
+    service = _service_with_env_candidates(slow_resolve)
 
     with pytest.raises(TimeoutError, match="env_candidates 执行超时"):
         await service.resolve_env_candidates_async(
             "demo_module",
             TaskContext(env_id=0, task_name="demo_module"),
-            "slow_accounts",
+            "ready_accounts",
             timeout=0.01,
         )
+
+
+@pytest.mark.asyncio
+async def test_resolve_env_candidates_async_times_out_async_provider_after_one_call():
+    calls = 0
+
+    async def slow_resolve():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.2)
+        return [1]
+
+    service = _service_with_env_candidates(slow_resolve)
+
+    with pytest.raises(TimeoutError, match="env_candidates 执行超时"):
+        await service.resolve_env_candidates_async(
+            "demo_module",
+            TaskContext(env_id=0, task_name="demo_module"),
+            "ready_accounts",
+            timeout=0.01,
+        )
+
+    assert calls == 1
 
 
 @pytest.mark.asyncio
@@ -263,6 +458,55 @@ async def test_run_v2_workflow_runs_object_cleanup_after_workflow_run(monkeypatc
     assert result.success is True
     assert cleanup_outcome is not None
     assert cleanup_outcome.status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_run_v2_workflow_exposes_candidate_context_to_setup_and_run(monkeypatch):
+    observed: list[tuple[str, object]] = []
+
+    class Workflow:
+        def run(self, ctx: TaskContext):
+            observed.append(("run", ctx.candidate_context))
+            return TaskResult.ok(message="ok")
+
+    class FakeContainer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def build_workflow(self):
+            return Workflow()
+
+        async def setup(self, context, _workflow, *, timeout_seconds=None):
+            observed.append(("setup", context.candidate_context))
+
+        async def cleanup(self, _context, _outcome, *, timeout_seconds=None):
+            pass
+
+    monkeypatch.setattr("src.core.mms.service.ObjectContainerV2", FakeContainer)
+    descriptor = ModuleRuntimeDescriptorV2(
+        workflows={
+            "default": V2RuntimeEntry(
+                meta=Crawler4jMeta(kind="workflow", name="default"),
+                target=Workflow,
+                module_name="demo_module.workflows.default",
+                attr_name="Workflow",
+                owner="workflows/default.py",
+            )
+        }
+    )
+    candidate_context = {"city": "上海", "task_count": 61}
+
+    await ModuleService()._run_v2_workflow(
+        descriptor,
+        TaskContext(
+            env_id=21,
+            task_name="demo_module",
+            candidate_context=candidate_context,
+            runtime={"workflow": "default"},
+        ),
+    )
+
+    assert observed == [("setup", candidate_context), ("run", candidate_context)]
 
 
 @pytest.mark.asyncio

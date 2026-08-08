@@ -1,11 +1,21 @@
 import asyncio
 import inspect
+import json
+import math
 import time
 from functools import partial
 from pathlib import Path
 from typing import Any
 
-from crawler4j_contracts import EnvCandidates, TaskContext, TaskOutcome, TaskResult, WorkflowLifecycleInfo
+from crawler4j_contracts import (
+    EnvCandidateResult,
+    EnvCandidates,
+    JSONValue,
+    TaskContext,
+    TaskOutcome,
+    TaskResult,
+    WorkflowLifecycleInfo,
+)
 
 from src.core.foundation.logging import logger
 from src.core.mms.models import ModuleInfo, ModuleSource, ModuleStatus
@@ -19,6 +29,7 @@ from src.core.mms.runtime_descriptor import (
 )
 
 ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS = 10.0
+ENV_CANDIDATE_CONTEXT_MAX_BYTES = 64 * 1024
 OBJECT_SETUP_TIMEOUT_SECONDS = 30.0
 
 
@@ -115,8 +126,8 @@ class ModuleService:
         context: TaskContext,
         candidates_name: str,
         params: dict[str, Any] | None = None,
-    ) -> list[int]:
-        """Run a core-native-v2 pure environment candidate provider."""
+    ) -> list[int] | EnvCandidateResult:
+        """Run a synchronous core-native-v2 environment candidate provider."""
         descriptor = self._load_descriptor_v2(module_name, context)
         normalized_name = str(candidates_name or "").strip()
         if not normalized_name:
@@ -126,7 +137,7 @@ class ModuleService:
             raise RuntimeError(f"env_candidates 不存在: {normalized_name}")
 
         result = self._invoke_env_candidates(entry.target, context, dict(params or {}))
-        return self._normalize_env_id_provider_result(result, context, label="env_candidates")
+        return self._normalize_env_candidate_provider_result(result, context)
 
     async def resolve_env_candidates_async(
         self,
@@ -136,14 +147,29 @@ class ModuleService:
         params: dict[str, Any] | None = None,
         *,
         timeout: float | None = ENV_CANDIDATE_EVALUATION_TIMEOUT_SECONDS,
-    ) -> list[int]:
-        """Run env candidates outside the main async loop with a hard timeout."""
+    ) -> list[int] | EnvCandidateResult:
+        """Run sync or async env candidates once with a hard timeout."""
 
-        loop = asyncio.get_running_loop()
-        task = loop.run_in_executor(
-            None,
-            partial(self.resolve_env_candidates, module_name, context, candidates_name, params),
-        )
+        async def resolve() -> list[int] | EnvCandidateResult:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                partial(
+                    self._resolve_env_candidates_unresolved,
+                    module_name,
+                    context,
+                    candidates_name,
+                    params,
+                ),
+            )
+            if inspect.isawaitable(result):
+                result = await result
+            return await loop.run_in_executor(
+                None,
+                partial(self._normalize_env_candidate_provider_result, result, context),
+            )
+
+        task = resolve()
         try:
             if timeout is None or timeout <= 0:
                 return await task
@@ -154,6 +180,28 @@ class ModuleService:
     @staticmethod
     def _invoke_env_candidates(target: Any, context: TaskContext, params: dict[str, Any]) -> Any:
         return ModuleService._invoke_env_id_provider(target, context, params, label="env_candidates")
+
+    def _resolve_env_candidates_unresolved(
+        self,
+        module_name: str,
+        context: TaskContext,
+        candidates_name: str,
+        params: dict[str, Any] | None,
+    ) -> Any:
+        descriptor = self._load_descriptor_v2(module_name, context)
+        normalized_name = str(candidates_name or "").strip()
+        if not normalized_name:
+            raise ValueError("环境候选函数不能为空")
+        entry = descriptor.env_candidates.get(normalized_name)
+        if entry is None:
+            raise RuntimeError(f"env_candidates 不存在: {normalized_name}")
+        return self._invoke_env_id_provider(
+            entry.target,
+            context,
+            dict(params or {}),
+            label="env_candidates",
+            allow_async=True,
+        )
 
     def resolve_env_cleanup_candidates(
         self,
@@ -209,8 +257,9 @@ class ModuleService:
         params: dict[str, Any],
         *,
         label: str,
+        allow_async: bool = False,
     ) -> Any:
-        if inspect.iscoroutinefunction(target):
+        if inspect.iscoroutinefunction(target) and not allow_async:
             raise RuntimeError(f"{label} 必须是同步纯函数")
         signature = inspect.signature(target)
         kwargs: dict[str, Any] = {}
@@ -234,6 +283,69 @@ class ModuleService:
         if isinstance(result, (list, tuple, set)):
             return [int(item) for item in result]
         raise RuntimeError(f"{label} 必须返回 EnvCandidates 或 env_id 列表")
+
+    @staticmethod
+    def _normalize_env_candidate_provider_result(
+        result: Any,
+        context: TaskContext,
+    ) -> list[int] | EnvCandidateResult:
+        if not isinstance(result, EnvCandidateResult):
+            return ModuleService._normalize_env_id_provider_result(
+                result,
+                context,
+                label="env_candidates",
+            )
+        candidates = ModuleService._normalize_env_id_provider_result(
+            result.candidates,
+            context,
+            label="env_candidates.candidates",
+        )
+        return EnvCandidateResult(
+            candidates=candidates,
+            context=ModuleService._normalize_env_candidate_context(result.context),
+        )
+
+    @staticmethod
+    def _normalize_env_candidate_context(context: JSONValue) -> JSONValue:
+        try:
+            ModuleService._validate_env_candidate_context(context, seen=set())
+            encoded = json.dumps(
+                context,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError, OverflowError, RecursionError, UnicodeError):
+            raise RuntimeError("env_candidates context 必须是 JSON-safe 数据") from None
+        if len(encoded) > ENV_CANDIDATE_CONTEXT_MAX_BYTES:
+            raise RuntimeError("env_candidates context 不得超过 64 KiB")
+        return json.loads(encoded)
+
+    @staticmethod
+    def _validate_env_candidate_context(value: Any, *, seen: set[int]) -> None:
+        if value is None or isinstance(value, (bool, int, str)):
+            return
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError("non-finite number")
+            return
+        if not isinstance(value, (list, dict)):
+            raise TypeError("unsupported JSON value")
+        marker = id(value)
+        if marker in seen:
+            raise ValueError("circular JSON value")
+        seen.add(marker)
+        try:
+            if isinstance(value, list):
+                for item in value:
+                    ModuleService._validate_env_candidate_context(item, seen=seen)
+                return
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise TypeError("JSON object keys must be strings")
+                ModuleService._validate_env_candidate_context(item, seen=seen)
+        finally:
+            seen.remove(marker)
 
     @staticmethod
     def _resolve_v2_workflow_name(context: TaskContext, descriptor: ModuleRuntimeDescriptorV2) -> str:

@@ -13,7 +13,7 @@
 - 页面操作使用 `@page_action` 纯函数
 - Hosted UI 用户操作使用 `@ui_action` 函数
 - 数据表和只读视图使用 `@data_table` / `@data_view`
-- 环境选择使用 `candidates/` 下的 `@env_candidates` 同步纯函数
+- 环境选择使用 `candidates/` 下同步或异步的 `@env_candidates` 只读函数
 - 批量环境清理使用 `cleanups/` 下的 `@env_cleanup_candidates` 同步纯函数
 
 0.4.0 新模块只按本目录的装饰器路径编写。历史契约只在迁移和排障页面作为旧概念出现，不作为新版 SDK 的兼容入口。
@@ -70,5 +70,5 @@
 | Workflow 参数 | `module.yaml.workflows[].parameters[]` | 移到具体 component 的 `parameters` 或 `object_param(...)` 注解 |
 | 数据表 / 视图 | `module.yaml.data` + `data/sql` | `@data_table(storage_mode=...)` / `@data_view` + manifest lock；`managed_dataset` 必须显式声明，视图只引用 `custom_table` |
 | 页面 | `pages/*.py` 使用 `@page` 装饰 load handler | 页面仍由宿主 schema 渲染，菜单由 `@page(menu=True)` 控制，用户操作接入 `@ui_action`，浏览器页面动作接入 `@page_action` |
-| Hook / 环境选择器 | `hooks/`、`env_selectors/` 固定导出 | 环境选择写成 `candidates/*.py` 中的 `@env_candidates` 同步纯函数；不提供 hook 兼容路径 |
+| Hook / 环境选择器 | `hooks/`、`env_selectors/` 固定导出 | 环境选择写成 `candidates/*.py` 中同步或异步的 `@env_candidates` 只读函数；不提供 hook 兼容路径 |
 | 批量环境清理 | 无一等模块契约 | `cleanups/*.py` 中的 `@env_cleanup_candidates` 同步纯函数返回待清理 env id，宿主统一预览、确认、二次安全校验和删除 |

@@ -11,6 +11,7 @@ import pytest
 
 from crawler4j_contracts import (
     CRAWLER4J_META_ATTR,
+    EnvCandidateResult,
     EnvCandidates,
     HOST_RESERVED_DATA_FIELDS,
     MANAGED_DATASET_RESERVED_DATA_FIELDS,
@@ -19,6 +20,7 @@ from crawler4j_contracts import (
     InjectSpec,
     ParameterOptionSpec,
     ParameterSpec,
+    TaskContext,
     component,
     data_table,
     data_view,
@@ -298,6 +300,29 @@ def test_env_candidates_metadata_and_query_chain():
         ],
         "limit": 20,
     }
+
+
+def test_env_candidate_result_carries_candidates_and_json_context():
+    result = EnvCandidateResult(
+        candidates=[21, 22],
+        context={"city": "上海", "task_count": 61},
+    )
+
+    assert result.candidates == [21, 22]
+    assert result.context == {"city": "上海", "task_count": 61}
+
+
+def test_task_context_repr_does_not_expose_candidate_context():
+    secret = "candidate-secret-sentinel"
+    result = EnvCandidateResult(candidates=[21], context={"secret": secret})
+    context = TaskContext(
+        env_id=21,
+        task_name="demo_module",
+        candidate_context=result.context,
+    )
+
+    assert secret not in repr(result)
+    assert secret not in repr(context)
 
 
 def test_env_cleanup_candidates_metadata_reuses_env_candidates_query_chain():

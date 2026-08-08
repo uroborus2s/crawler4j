@@ -245,7 +245,7 @@ Hosted UI 的页面读取、渲染和 action 调用属于宿主 UI surface，不
 
 对象生命周期归宿主所有。Core 会在每个 task/env 内创建独立对象图，并在 `workflow.run(ctx)` 前按 component 组合顺序再到 workflow 调用可选 `setup(ctx, workflow)`；`workflow` 为 `WorkflowLifecycleInfo`，包含当前 workflow 名称、标签、描述和代码符号。终态时按 component 依赖反向顺序再到 workflow 调用可选 `cleanup(ctx, outcome)`，`outcome.workflow` 保存同一份 workflow 信息，`outcome.status` 为 `succeeded`、`failed`、`timed_out` 或 `cancelled`。setup 失败会阻止 `workflow.run(ctx)` 并进入 cleanup；cleanup 不设置宿主固定执行超时，异常只写日志，不覆盖任务终态或环境回收结果；用户停止或超时收尾期间，单个 cleanup 因停止信号抛出 `asyncio.CancelledError` 时也只记录该对象清理失败，并继续清理后续对象；旧 `aclose()` / `close()` 不再会被宿主调用。
 
-环境选择写在 `candidates/*.py` 中，使用 `@env_candidates` 装饰同步纯函数。函数可以直接返回 env id 列表，也可以返回 `EnvCandidates.from_table(...).filter(...).order_by(...).limit(...)` 这样的链式查询。账号注册时间、会员等级、黑号状态等模块业务过滤应存放在模块数据表中，并在候选纯函数里实时查询，不需要同步资源池。运行模板的选择环境模式会保存候选函数名和可选 `candidate_params` 字典，UI 中可通过“候选参数”配置窗口填写 YAML 对象。
+环境选择写在 `candidates/*.py` 中，使用 `@env_candidates` 装饰同步或异步只读函数。函数可以返回 env id 列表、`EnvCandidates.from_table(...).filter(...).order_by(...).limit(...)` 链式查询，或 `EnvCandidateResult(candidates=..., context=...)`。账号注册时间、会员等级、黑号状态等模块业务过滤应存放在模块数据表中并实时查询，不需要同步资源池。运行模板会保存候选函数名和可选 `candidate_params` 字典。
 
 ```python
 from crawler4j_contracts import EnvCandidates, env_candidates
@@ -264,7 +264,21 @@ def ready_accounts(params: dict | None = None) -> EnvCandidates:
     )
 ```
 
-候选函数是同步纯函数，可以声明 `params` 接收运行模板候选参数，也可以声明 `ctx` 或 `context` 读取只读 `ctx.db`。候选函数不暴露 `ctx.tools`，也不创建、启动或销毁环境。
+需要在选择前异步读取外部事实时，可以返回结构化结果：
+
+```python
+from crawler4j_contracts import EnvCandidateResult, TaskContext, env_candidates
+
+
+@env_candidates(name="ready_accounts")
+async def ready_accounts(ctx: TaskContext) -> EnvCandidateResult:
+    response = await ctx.tools.call("http.request", method="GET", url="https://example.com/capacity")
+    return EnvCandidateResult(candidates=[21], context={"source_status": response["status_code"]})
+```
+
+候选函数可声明 `params`，也可声明 `ctx` / `context` 读取只读 `ctx.db`；候选 surface 仅额外提供宿主管理的异步 `http.request`，不提供浏览器或环境写入工具。结构化 context 必须是 compact UTF-8 JSON，禁止 NaN/Infinity，最大 65536 字节。Core 每次环境选择只调用一次 provider；选中后 workflow 的 `setup` / `run` 从 `ctx.candidate_context` 读取同一次 context。旧列表/DSL、固定 `env_id`、创建环境路径的 `candidate_context` 为 `None`；候选为空时不运行 workflow。
+
+外部模块使用 `EnvCandidateResult` / `TaskContext.candidate_context` 时，运行依赖最低为 `crawler4j-contracts>=0.4.5,<0.5.0`；开发期 async scanner/manifest 支持最低为 `crawler4j-sdk>=0.4.6,<0.5.0`。这两个版本当前是 workspace 源码版本，正式 PyPI 发布另行执行。
 
 模块数据表如果代表账号、登录态或其他环境绑定业务实体，必须在 `@data_table(..., env_binding_field="env_id")` 中声明绑定字段；字段必须存在于 schema 且为 integer。宿主只通过这些声明扫描“模块是否已经认领环境”。
 

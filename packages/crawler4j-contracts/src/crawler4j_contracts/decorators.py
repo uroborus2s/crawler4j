@@ -462,7 +462,7 @@ def env_candidates(
     label: str = "",
     description: str = "",
 ) -> Callable[[TargetT], TargetT]:
-    """Declare a pure environment candidate provider."""
+    """Declare a sync or async, read-only environment candidate provider."""
     return _decorate(Crawler4jMeta(kind="env_candidates", name=name, label=label, description=description))
 
 

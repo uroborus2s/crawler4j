@@ -284,14 +284,15 @@
 | 目标语义 | `运行中 + 等待中 = 目标并发`；资源不足属于正常等待，不属于失败 |
 | 进入队列前提 | 只有 `JobType.SERVICE + AcquisitionConfig.mode=select + candidates 非空` 时才进入候选等待语义；固定 `env_id` 直接派发，不排队 |
 | 固定环境 UI | 运行模板选择已有环境时默认保存固定 `env_id`；候选列表只包含未归属或归属当前模块的 `READY + BROWSER + 无租约` 环境，不展示其他模块环境或非浏览器环境 |
-| 候选声明 | 模块在 `candidates/*.py` 中声明 `@env_candidates(name=...)` 同步纯函数，运行模板的 `AcquisitionConfig.candidates` 只能引用已声明函数 |
-| 模块开发者职责 | 在候选纯函数中实时读取模块数据，返回 env id 列表或 `EnvCandidates` 链式查询；账号黑名单、注册时间、会员等级等过滤都写在这个函数里 |
+| 候选声明 | 模块在 `candidates/*.py` 中声明同步或异步 `@env_candidates(name=...)` 只读函数；运行模板的 `AcquisitionConfig.candidates` 只能引用已声明函数 |
+| 模块开发者职责 | 实时读取模块数据或通过候选 surface 的 `http.request` 异步读取外部事实，返回 env id 列表、`EnvCandidates`，或 `EnvCandidateResult(candidates, context)`；账号黑名单、注册时间、会员等级等过滤仍由模块负责 |
 | 唯一开发路径 | 不提供 `module.yaml.resource_pools[]`、资源池资格卡片、资源池同步任务或 `env.*resource_pool*` 工具；0.4.0 不兼容 `selector_name/env_selector/resource_pool` |
-| 宿主职责 | 在只读 `ctx.db`、无工具面的候选运行面执行纯函数，按返回顺序筛选 `READY + BROWSER + 无租约` 环境，租约成功后再次求值确认候选仍有效，并维护 FIFO 等待与超时收口 |
+| 宿主职责 | 在只读 `ctx.db` + 仅 `http.request` 工具面的候选运行面执行 provider 一次，正确 await 返回值，按返回顺序筛选 `READY + BROWSER + 无租约` 环境；租约后不重跑 provider，但仍复核指纹、claim 与 `env_binding_field`，并维护 FIFO 等待与超时收口 |
+| 候选 context | `EnvCandidateResult.context` 必须是 compact UTF-8 JSON、禁止 NaN/Infinity、大小 `<=65536` 字节；选中后原子注入 `TaskContext.candidate_context`，不记录内容。旧返回值、固定/创建环境为 `None`；空候选不启动 workflow |
 | 候选组合 | `EnvCandidates` 支持 `filter()`、`exclude()`、`intersect()`、`union()`、`minus()`、`order()`、`limit()`、`list(ctx)` 链式调用；每个函数既能直接返回查询对象，也能被组合复用 |
 | 容量变化触发 | 环境释放、新环境可分配、异常/暂停环境恢复、作业激活/更新，以及主 async loop 上的轻量异步巡检都会触发候选容量重算 |
-| 黑号规则 | 黑号、封禁、账号状态变化写入模块业务表；候选纯函数实时过滤这些状态，不同步到宿主资源池 |
-| 候选竞争语义 | 候选环境如果在租约阶段被其他任务抢走，或租约后重算发现已不在候选集合，当前任务回到等待席位，不直接记失败；真实异常进入失败收口 |
+| 黑号规则 | 黑号、封禁、账号状态变化写入模块业务表；候选函数实时过滤这些状态，不同步到宿主资源池 |
+| 候选竞争语义 | 候选环境如果在租约阶段被其他任务抢走，或租约后宿主指纹/claim/业务绑定复核失效，当前任务释放租约并回到等待席位；真实 provider、超时或 context 校验异常进入失败收口 |
 | 等待状态口径 | 候选等待复用底层 `TaskStatus.PENDING`；UI 展示为 `等待环境`，等待中的 `task.message` 为 `等待环境候选可用: <candidates>` |
 | 等待超时口径 | `wait_timeout` 同时用于环境租约获取与候选等待席位收口；候选等待从第一次写下 `waiting_since` 开始计时，`wait_timeout=0` 时当前不会自动超时收口；失败文案为 `等待环境候选超时: <candidates> (<seconds>s)`，且与 `execution.timeout` 分离 |
 | 环境回收口径 | 任务终态后的环境处置统一为回收；候选队列只从 `READY + BROWSER + 无租约 + 已由同模块声明绑定` 的环境中取数 |
@@ -320,6 +321,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
+| 2026-08-08 | 扩展 `API-007`：支持 sync/async 候选、`EnvCandidateResult`、64 KiB JSON-safe context、候选 HTTP surface 与租约后宿主安全复核 | Codex |
 | 2026-07-19 | 新增 `API-024`，登记 full runtime `http.request`、请求保真、HTTP/2 强制语义、第三方实现隔离和发布依赖门 | Codex |
 | 2026-07-13 | 新增 `API-022`，登记 `env.cookie.ensure` 完整集合全量替换、Provider 实测协议、严格重启、TaskContext 回绑和敏感信息边界 | Codex |
 | 2026-07-10 | 新增 `API-021`，登记 Hosted UI DataTable 当前页选择、CRUD 批量 handler、SDK 类型 gate、Core 调用边界与模块数据 owner | Codex |

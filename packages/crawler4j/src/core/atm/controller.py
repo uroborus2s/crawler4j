@@ -14,7 +14,7 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from crawler4j_contracts import TaskContext
+from crawler4j_contracts import EnvCandidateResult, TaskContext
 from src.core.atm.job_runtime import resolve_job_run_profile
 from src.core.atm.dispatcher import get_task_dispatcher
 from src.core.atm.models import Job, JobState, JobType, TaskStatus, TriggerType
@@ -517,6 +517,8 @@ class JobController:
         except Exception as exc:
             logger.warning(f"[ATM] Failed to evaluate env candidates {module_name}.{candidates_name}: {exc}")
             return 0
+        if isinstance(candidate_ids, EnvCandidateResult):
+            candidate_ids = candidate_ids.candidates
         wanted = {int(env_id) for env_id in candidate_ids}
         capacity = 0
         for env in await self.rem.list_envs():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tomllib
 import zipfile
 from pathlib import Path
@@ -60,6 +61,35 @@ def test_sdk_cli_scaffold_to_package_verify_acceptance(rich_module_root: Path, b
     assert "demo_model/workflows/repair_orders.py" in members
     assert "demo_model/env_selectors/pick_ready.py" not in members
     assert "demo_model/module_runtime.py" not in members
+
+
+def test_sdk_cli_accepts_async_structured_env_candidates_in_manifest_and_package(module_root: Path):
+    candidate_path = module_root / "candidates" / "ready_accounts.py"
+    candidate_path.write_text(
+        "from crawler4j_contracts import EnvCandidateResult, env_candidates\n\n"
+        "@env_candidates(name='ready_accounts')\n"
+        "async def ready_accounts(ctx, params=None) -> EnvCandidateResult:\n"
+        "    return EnvCandidateResult(candidates=[21], context={'city': 'Shanghai'})\n",
+        encoding="utf-8",
+    )
+
+    lock_result = run_cli("manifest", "lock", cwd=module_root)
+    lock_result.assert_ok()
+    check_result = run_cli("check", "full", cwd=module_root)
+    check_result.assert_ok()
+    package_result = run_cli("package", "build", cwd=module_root)
+    package_result.assert_ok()
+    archive_path = module_root / "dist" / f"{module_root.name}-{MODULE_VERSION}.zip"
+    verify_result = run_cli("package", "verify", str(archive_path), cwd=module_root)
+    verify_result.assert_ok()
+
+    lock = json.loads((module_root / ".crawler4j" / "manifest.lock.json").read_text(encoding="utf-8"))
+    declarations = [
+        item
+        for item in lock["declarations"]
+        if item["kind"] == "env_candidates" and item["name"] == "ready_accounts"
+    ]
+    assert len(declarations) == 1
 
 
 def test_sdk_cli_scaffold_package_verify_rejects_legacy_module_runtime_acceptance(module_root: Path):

@@ -101,7 +101,7 @@ _RUNTIME_SURFACE_TOOL_NAMES: dict[str, frozenset[str] | None] = {
             "ui.get_page",
         }
     ),
-    RUNTIME_SURFACE_ENV_CANDIDATES: frozenset(),
+    RUNTIME_SURFACE_ENV_CANDIDATES: frozenset({"http.request"}),
     RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES: frozenset(),
 }
 DECLARE_UI_SIDE_EFFECT_DB_TOOLS: set[str] = set()

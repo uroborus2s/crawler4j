@@ -99,6 +99,14 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     table_result = _run_cli("page", "create", "accounts", cwd=target)
     assert table_result.returncode == 0, table_result.stderr
 
+    (target / "candidates" / "ready_accounts.py").write_text(
+        "from crawler4j_contracts import EnvCandidateResult, env_candidates\n\n"
+        "@env_candidates(name='ready_accounts', label='Ready accounts')\n"
+        "async def ready_accounts(ctx, params=None) -> EnvCandidateResult:\n"
+        "    return EnvCandidateResult(candidates=[21], context={'city': 'Shanghai'})\n",
+        encoding="utf-8",
+    )
+
     lock_result = _run_cli("manifest", "lock", cwd=target)
     assert lock_result.returncode == 0, lock_result.stderr
 
@@ -138,6 +146,11 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     assert ("workflow", "repair_orders") in lock_names
     assert ("page", "dashboard") in lock_names
     assert ("page", "accounts") in lock_names
+    ready_candidate_declarations = [
+        item for item in lock["declarations"]
+        if item["kind"] == "env_candidates" and item["name"] == "ready_accounts"
+    ]
+    assert len(ready_candidate_declarations) == 1
 
     with zipfile.ZipFile(archive) as zf:
         members = set(zf.namelist())
@@ -147,6 +160,7 @@ def test_cli_module_scaffold_flow_end_to_end(tmp_path: Path):
     assert "demo_model/pages/accounts.py" in members
     assert "demo_model/env_selectors/pick_ready.py" not in members
     assert "demo_model/tasks/extra_task.py" in members
+    assert "demo_model/candidates/ready_accounts.py" in members
     assert "demo_model/workflows/repair_orders.py" in members
     assert "demo_model/module_runtime.py" not in members
 

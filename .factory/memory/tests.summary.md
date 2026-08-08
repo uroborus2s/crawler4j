@@ -1,9 +1,10 @@
 # Tests Summary
 
-更新时间：2026-07-28。只保留最近验证门，不复制完整测试历史。
+更新时间：2026-08-08。只保留最近验证门，不复制完整测试历史。
 
 ## 最近验证
 
+- CR-025 / TASK-045：功能 TDD RED 为缺少 `EnvCandidateResult` 导出；共享包版本一致性 RED 为 `5 failed, 60 passed`；客户端 `0.4.41` 一致性 RED 为 `1 failed, 64 passed`。最终定向功能+版本/打包 `320 passed`、SDK integration+acceptance `32 passed`、full unit `1287 passed`；Ruff、`uv lock --check`、docs-stratego `pages=87 contracts=0`、JSON/diff 通过。crawler4j `0.4.41`、Contracts `0.4.5`、SDK `0.4.6` wheel/sdist 构建成功，METADATA 与 Contracts wheel 隔离公开导入通过。证据：`.factory/workitems/CR-025/evidence/TASK-045.md`。
 - CR-024 / TEST-BB-024：RED `1 failed`（示例目录缺失）；GREEN `1 passed`；最终 SDK 模块端到端文件 `12 passed`。示例模块 full、ZIP build/verify、Node 语法、目标 Ruff、diff 和 JSONL check 通过，失败/错误/跳过均为 0。真实 Cheese Android 设备 E2E 是 reviewer 接受的用户侧 N/A。证据：`.factory/workitems/CR-024/evidence/final-verification.md`。
 - CR-023 / TC-071：首轮 runtime RED 为 collection error；统一 HTTP tool 架构 RED `3 failed, 2 passed`；工具/能力 GREEN `50 passed`，独立 review 后严格布尔校验 RED `3 failed, 8 passed`、最终工具集 GREEN `12 passed`；最终定向回归 `152 passed`、全量 unit `1265 passed`。root 0.4.40 wheel/sdist 构建、全新 venv 安装、HTTP2 client check 和 `http.request` surface 通过。macOS PyInstaller 首轮因缺 httpx metadata 失败，补充 `copy_metadata` RED/GREEN 后复建并输出 `http2_client=ok`。
 - TASK-042 发布候选：root sdist 污染修复两组 TDD RED/GREEN、打包文件 `63 passed`、版本/打包聚焦 `175 passed`；全量 unit `1235 passed`，另有 13 项既有沙箱/只读数据库环境基线；全仓 Ruff、lock、JSON、docs、UI smoke、三包 build、METADATA/SHA256、两包 publish dry-run、diff gate 通过。证据：`.factory/workitems/TASK-042/evidence/release.md`、`root-sdist-contamination-fix-tdd.md`。

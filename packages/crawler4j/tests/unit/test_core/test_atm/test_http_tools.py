@@ -8,7 +8,6 @@ import pytest
 
 from src.core.atm.runtime_capabilities import (
     RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES,
-    RUNTIME_SURFACE_ENV_CANDIDATES,
     RUNTIME_SURFACE_HOSTED_UI_ACTION,
     RUNTIME_SURFACE_HOSTED_UI_DECLARE,
     RUNTIME_SURFACE_HOSTED_UI_READONLY,
@@ -171,11 +170,10 @@ async def test_http_request_decodes_brotli_response(monkeypatch):
         RUNTIME_SURFACE_HOSTED_UI_DECLARE,
         RUNTIME_SURFACE_HOSTED_UI_READONLY,
         RUNTIME_SURFACE_HOSTED_UI_ACTION,
-        RUNTIME_SURFACE_ENV_CANDIDATES,
         RUNTIME_SURFACE_ENV_CLEANUP_CANDIDATES,
     ],
 )
-def test_http_request_is_only_available_on_full_runtime_surface(surface):
+def test_http_request_is_unavailable_on_other_restricted_runtime_surfaces(surface):
     caps = build_runtime_capabilities("demo_module", surface=surface)
 
     assert caps.tools.has_tool("http.request") is False

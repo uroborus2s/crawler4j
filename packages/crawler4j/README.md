@@ -1,8 +1,10 @@
 # crawler4j
 
-`crawler4j` 是 monorepo 中的桌面宿主与 Core 运行时包，当前源码版本基线为 `0.4.40`。
+`crawler4j` 是 monorepo 中的桌面宿主与 Core 运行时包，当前源码版本基线为 `0.4.41`。
 
 它负责承载桌面 Shell、ATM / REM / MMS 等运行时能力，以及版本读取、调试桥接和 PyInstaller 打包。
+
+Core 的 `@env_candidates` 运行链同时支持同步与异步函数。候选可返回旧式 env id 集合/`EnvCandidates`，也可返回 `EnvCandidateResult`；Core 校验其中最多 64 KiB 的 JSON-safe context，并在同一次选择成功后通过 `TaskContext.candidate_context` 注入 workflow。固定环境、创建环境和旧候选没有 candidate context，空候选不启动 workflow。
 
 ## Package Layout
 

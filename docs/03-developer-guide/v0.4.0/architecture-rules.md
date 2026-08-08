@@ -14,7 +14,7 @@
 | `tasks/` | `@page_action` | 浏览器页面自动化动作 |
 | `pages/` | `@page`、`@ui_action` | Hosted UI 页面与用户操作适配器 |
 | `data/` | `@data_table`、`@data_view` | 持久化表、只读视图和 read model 契约 |
-| `candidates/` | `@env_candidates` | 运行环境候选纯函数 |
+| `candidates/` | `@env_candidates` | 同步或异步运行环境候选只读函数 |
 | `cleanups/` | `@env_cleanup_candidates` | 批量环境清理候选纯函数 |
 
 需要私有 helper 时，放到所属固定目录内，并用下划线命名，例如 `tasks/_browser.py`、`pages/_widgets.py`、`objects/_mapping.py`、`data/_sql.py`。不要把跨层 helper 聚合到根目录。

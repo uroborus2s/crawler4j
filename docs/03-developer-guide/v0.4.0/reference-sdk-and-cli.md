@@ -23,7 +23,7 @@
 | `ui-action` | `ui-action create` `ui-action list` | `@ui_action` 函数 |
 | `page` | `page create` `page list` | `@page` Hosted UI 页面 |
 | `data` | `data table create [--storage-mode custom_table\|managed_dataset]` `data view create` `data list` | `@data_table` / `@data_view` |
-| `candidate` | `candidate create` `candidate list` | `@env_candidates` 同步纯函数 |
+| `candidate` | `candidate create` `candidate list` | 同步或异步 `@env_candidates` 只读函数 |
 | `cleanup` | `cleanup create` `cleanup list` | `@env_cleanup_candidates` 同步纯函数 |
 | `config` | `config show` `config set module --file <yaml>` `config lint` | `module.yaml.config_defaults` |
 | `manifest` | `manifest lock` | `.crawler4j/manifest.lock.json` |
