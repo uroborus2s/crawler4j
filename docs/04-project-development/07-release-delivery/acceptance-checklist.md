@@ -22,7 +22,7 @@
 | 测试 | `uv run pytest -q` 通过 | `test-plan.md` | 已具备（2026-08-08 全量 unit `1287 passed`，相关 integration/acceptance `32 passed`） |
 | 测试 | `uv run ruff check .` 通过 | `test-plan.md` | 已具备（2026-08-08 全仓复验通过） |
 | 运行 | `uv run python scripts/smoke_test_ui.py` 通过 | `test-plan.md` | 已具备（2026-07-15 复验通过；覆盖 Shell 结构与 Dashboard 异步刷新） |
-| 构建 | Root / SDK / Contracts build 通过 | `test-plan.md` | 已具备（root 0.4.41、SDK 0.4.6、Contracts 0.4.5 wheel/sdist 均已本地构建；root 0.4.40 wheel HTTP2 隔离 smoke 为历史证据） |
+| 构建 | Root / SDK / Contracts build 通过 | `test-plan.md` | 已具备（root 0.4.41、SDK 0.4.6、Contracts 0.4.5 wheel/sdist 均已构建；SDK/Contracts 已发布并通过隔离安装；root 0.4.40 wheel HTTP2 隔离 smoke 为历史证据） |
 | 宿主 HTTP 运行时 | wheel 与目标平台冻结发布物可执行 HTTP/2/Brotli 诊断 | `API-024`, `TC-071` | 部分具备（wheel 与 macOS arm64 PyInstaller app 通过；Windows 目标平台待验证） |
 | 构建 | 桌面客户端下载包（macOS / Windows）齐备 | `delivery-package.md` | 部分具备（2026-06-19 已重新生成并上传 macOS `Crawler4j-0.4.16.dmg` / `appcast.xml`；Windows `PyInstaller onedir + Velopack` 发布链已落地，但当前批次仍缺 Windows 真机签名、安装、升级证据与正式下载地址） |
 | 业务 | `ctrip` 真实站点 E2E 完成并记录结果 | `ctrip-real-site-e2e-closeout.md` + 真实环境验证记录 | 阻塞（当前只补齐了 DevLink 活跃事实、fresh ZIP 预检与历史登录日志，仍未完成本轮 DevLink + ZIP 双链真实站点闭环） |
@@ -41,7 +41,7 @@
 ## 4. 当前阻塞项
 
 1. `ctrip` 真实站点 E2E 仍未按 `ctrip-real-site-e2e-closeout.md` 完成本轮 DevLink + ZIP 双链回放并留证；当前只复验了 DevLink 活跃状态、fresh ZIP 预检和历史真实登录日志。
-2. 当前 `0.4.41` 尚未构建桌面发布资产；`0.4.40` 已构建本机 macOS PyInstaller app 并通过 HTTP 运行时诊断，但签名 DMG/更新源、Windows 包、Git tag / GitHub release 资产仍待后续创建；SDK 0.4.5 / Contracts 0.4.4 已完成 PyPI 发布。
+2. 当前 `0.4.41` 尚未构建桌面发布资产；`0.4.40` 已构建本机 macOS PyInstaller app 并通过 HTTP 运行时诊断，但签名 DMG/更新源、Windows 包、Git tag / GitHub release 资产仍待后续创建；SDK 0.4.6 / Contracts 0.4.5 已完成 PyPI 发布。
 3. `ctrip_crawler` 外部模块必须改接 `ctx.tools.call("http.request")` 后再执行真实房型请求 E2E；模块 ZIP 不安装 `h2`。
 4. 当前虽已具备 Windows `PyInstaller onedir + Velopack` 发布链，但本轮仍缺 Windows 真机签名、安装、升级留证与正式下载地址，不能声称“Windows 交付包已放行”。
 

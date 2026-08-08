@@ -29,10 +29,8 @@
 | 根应用包版本 | `0.4.41` | 当前仓库源码事实；承接 CR-025 异步环境候选与候选 context 能力 |
 | 根应用运行时版本 | `0.4.41` | 由运行时代码从包元数据或 `packages/crawler4j/pyproject.toml` 解析 |
 | 最近正式发布 tag | `v0.2.0` | 最新已知正式发布 |
-| SDK 源码 | `0.4.6` | 待发布；支持 async `@env_candidates` scanner/manifest，依赖 `crawler4j-contracts>=0.4.5,<0.5.0` |
-| Contracts 源码 | `0.4.5` | 待发布；新增 `EnvCandidateResult`、`JSONValue` 与 `TaskContext.candidate_context` |
-| SDK 已发布 | `0.4.5` | PyPI 当前版本；不包含本轮异步候选新契约 |
-| Contracts 已发布 | `0.4.4` | PyPI 当前版本；不包含本轮候选 context 新契约 |
+| SDK 源码 / 已发布 | `0.4.6` | 已发布到 PyPI；支持 async `@env_candidates` scanner/manifest，依赖 `crawler4j-contracts>=0.4.5,<0.5.0` |
+| Contracts 源码 / 已发布 | `0.4.5` | 已发布到 PyPI；新增 `EnvCandidateResult`、`JSONValue` 与 `TaskContext.candidate_context` |
 | docs-stratego 主文档版本 | 待正式发布前确认 | 当前源码文档入口已把 0.4.x 作为当前主线、0.3.x 作为历史维护；发布站点切换仍需随正式发布动作确认 |
 
 ## 3. 为什么这样定义
@@ -58,7 +56,7 @@
 | 日期 | 变更内容 | 变更人 |
 |---|---|---|
 | 2026-08-08 | 根应用 / 运行时源码提升到 `0.4.41`，承接 async `@env_candidates`、候选 context 单次传递和 Contracts `0.4.5` / SDK `0.4.6` 公共契约 | Codex |
-| 2026-08-08 | Contracts 源码提升到 `0.4.5`、SDK 源码提升到 `0.4.6`，用于 async `@env_candidates`、`EnvCandidateResult` 与 `TaskContext.candidate_context`；SDK/Core 最低依赖 Contracts `0.4.5`，本轮不发布 | Codex |
+| 2026-08-08 | Contracts `0.4.5`、SDK `0.4.6` 发布到 PyPI；SDK/Core 最低依赖 Contracts `0.4.5`，在线文件 SHA-256 与隔离安装已核对 | Codex |
 | 2026-07-19 | 将根应用 / 运行时源码版本提升到 `0.4.40`，新增 `API-024 http.request`，宿主内部纳入 HTTP/2/Brotli 依赖，并完成 wheel 隔离安装与 macOS PyInstaller 运行时检查 | Codex |
 | 2026-07-15 | 将根应用 / 运行时源码版本提升到 `0.4.39`，Contracts 提升到 `0.4.4`、SDK 提升到 `0.4.5`，用于发布 CR-022 Hosted UI 通用 Form 契约与 SDK 支持 | Codex |
 | 2026-07-14 | 将根应用 / 运行时源码版本提升到 `0.4.38`，为 `env.cookie.ensure` 增加分阶段脱敏错误诊断；SDK 0.4.4 / Contracts 0.4.3 保持不变 | Codex |

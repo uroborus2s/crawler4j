@@ -32,12 +32,12 @@
     "sdk_build": {
       "command": "uv build --package crawler4j-sdk --out-dir /tmp/cr025-sdk-build",
       "result": "passed",
-      "details": "crawler4j-sdk 0.4.6 wheel/sdist built locally on 2026-08-08; METADATA requires Contracts >=0.4.5,<0.5.0. Published PyPI version remains 0.4.5"
+      "details": "crawler4j-sdk 0.4.6 wheel/sdist built and published to PyPI on 2026-08-08 after Contracts 0.4.5; online SHA-256, dependency metadata and isolated PyPI installation passed"
     },
     "contracts_build": {
       "command": "uv build --package crawler4j-contracts --out-dir /tmp/cr025-contracts-build",
       "result": "passed",
-      "details": "crawler4j-contracts 0.4.5 wheel/sdist built locally on 2026-08-08 and its isolated public API smoke passed. Published PyPI version remains 0.4.4"
+      "details": "crawler4j-contracts 0.4.5 wheel/sdist built and published to PyPI on 2026-08-08; online SHA-256 and isolated public API smoke passed"
     },
     "sdk_cli_help": {
       "command": "uv run python -m crawler4j_sdk.cli.commands --help",

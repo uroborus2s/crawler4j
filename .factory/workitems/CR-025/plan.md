@@ -25,8 +25,8 @@
   - `packages/crawler4j-contracts/src/crawler4j_contracts/decorators.py`
   - `packages/crawler4j/tests/{unit,integration,acceptance}/**`
   - `.factory/workitems/CR-025/**`、必要的 `.factory/memory/**`
-- 禁止：修改 `ctrip_crawler`；新增依赖；PR、发布；记录候选 context 内容。
-- 当前 Gate：用户已授权客户端 `0.4.41` 版本收口、提交全部本任务变更并推送当前 `0.4.0` 分支；提交前仍需独立只读 review 与新鲜完整验证。
+- 禁止：修改 `ctrip_crawler`；新增依赖；记录候选 context 内容。
+- 当前 Gate：用户已授权客户端 `0.4.41` 版本收口、PR 合并 `main` 及 Contracts/SDK 发布；发布后核对索引和隔离安装。
 
 ## TASK-045：公共契约与运行闭环
 
