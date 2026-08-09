@@ -12,7 +12,7 @@
     "tests": {
       "command": "uv run pytest packages/crawler4j/tests/unit -q -p no:cacheprovider",
       "result": "passed",
-      "details": "1287 passed on 2026-08-08 for crawler4j 0.4.41 / Contracts 0.4.5 / SDK 0.4.6; CR-025 focused functionality and packaging tests passed 320 tests, with related integration and acceptance passing 32 tests"
+      "details": "1288 passed on 2026-08-09 for crawler4j 0.4.42 / Contracts 0.4.5 / SDK 0.4.6; service candidate probe regression and version/packaging tests passed 111 tests"
     },
     "docs": {
       "command": "uvx --from docs-stratego docs-stratego source validate --repo-path .",
@@ -22,12 +22,12 @@
     "lint": {
       "command": "uv run ruff check .",
       "result": "passed",
-      "details": "uv run ruff check . passed on 2026-08-08 for crawler4j 0.4.41 / Contracts 0.4.5 / SDK 0.4.6; historical manual/debug/verify/analyze scripts remain excluded from the default lint gate"
+      "details": "uv run ruff check . passed on 2026-08-09 for crawler4j 0.4.42 / Contracts 0.4.5 / SDK 0.4.6; historical manual/debug/verify/analyze scripts remain excluded from the default lint gate"
     },
     "root_build": {
-      "command": "uv build --package crawler4j --out-dir /tmp/cr025-root-build",
+      "command": "uv build --package crawler4j --out-dir /tmp/cr026-root-build",
       "result": "passed",
-      "details": "crawler4j 0.4.41 wheel/sdist built on 2026-08-08; wheel METADATA requires crawler4j-contracts>=0.4.5,<0.5.0. Isolated root installation and desktop packaging remain historical 0.4.40 evidence"
+      "details": "crawler4j 0.4.42 wheel/sdist built on 2026-08-09; wheel METADATA requires crawler4j-contracts>=0.4.5,<0.5.0. Isolated root installation and desktop packaging remain historical 0.4.40 evidence"
     },
     "sdk_build": {
       "command": "uv build --package crawler4j-sdk --out-dir /tmp/cr025-sdk-build",
@@ -157,8 +157,8 @@
   },
   "versions": {
     "workspace_root": "0.0.0",
-    "app_package_pyproject": "0.4.41",
-    "runtime": "0.4.41",
+    "app_package_pyproject": "0.4.42",
+    "runtime": "0.4.42",
     "git_tag_latest": "v0.2.0",
     "sdk": "0.4.6",
     "contracts": "0.4.5"
