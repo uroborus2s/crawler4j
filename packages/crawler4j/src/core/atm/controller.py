@@ -632,28 +632,33 @@ class JobController:
         if not binding:
             return
 
-        capacity = await self._count_candidate_capacity(job)
         running_like_count = await self.repo.count_tasks_by_statuses(
             job.id,
             [TaskStatus.RUNNING],
         )
         remaining_target = job.concurrency_target - running_like_count
-        resumable = min(max(remaining_target, 0), capacity)
-        if resumable <= 0:
+        if remaining_target <= 0:
             return
 
         if hasattr(self.repo, "get_oldest_waiting_tasks"):
             pending_tasks = await self.repo.get_oldest_waiting_tasks(
                 job.id,
                 [TaskStatus.PENDING],
-                limit=resumable,
+                limit=remaining_target,
             )
         else:
             pending_tasks = await self.repo.get_oldest_tasks_by_status(
                 job.id,
                 [TaskStatus.PENDING],
-                limit=resumable,
+                limit=remaining_target,
             )
+        if not pending_tasks:
+            return
+
+        capacity = await self._count_candidate_capacity(job)
+        resumable = min(remaining_target, len(pending_tasks), capacity)
+        if resumable <= 0:
+            return
         resumed = 0
         for task in pending_tasks:
             if resumed >= resumable:

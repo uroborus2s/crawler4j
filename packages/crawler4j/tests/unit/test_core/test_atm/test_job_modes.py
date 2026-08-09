@@ -377,6 +377,27 @@ async def test_service_job_candidates_resume_waiting_tasks_up_to_current_capacit
 
 
 @pytest.mark.asyncio
+async def test_service_job_skips_candidate_probe_when_running_tasks_fill_concurrency():
+    controller = JobController()
+    controller.repo = SimpleNamespace(count_tasks_by_statuses=AsyncMock(return_value=1))
+    controller._count_candidate_capacity = AsyncMock(return_value=1)
+
+    job = Job(
+        id="service-job",
+        name="service",
+        type=JobType.SERVICE,
+        state=JobState.ACTIVE,
+        run_profile=_build_select_run_profile(candidates="bound_account_ready"),
+        concurrency_target=1,
+        trigger=TriggerConfig(type=TriggerType.MANUAL),
+    )
+
+    await controller._resume_candidate_waiting_tasks(job)
+
+    controller._count_candidate_capacity.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_service_job_resumes_waiting_candidates_before_dispatching_new_tasks():
     controller = JobController()
     events: list[str] = []

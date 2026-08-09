@@ -164,7 +164,7 @@ uv sync --all-packages
 uv run python -m src.ui.app --crawler4j-verify-http-runtime
 
 # 2. wheel 安装环境：先安装/升级新构建的宿主 wheel，再从该解释器运行
-uv pip install --upgrade /absolute/path/to/crawler4j-0.4.41-py3-none-any.whl
+uv pip install --upgrade /absolute/path/to/crawler4j-0.4.42-py3-none-any.whl
 python -m src.ui.app --crawler4j-verify-http-runtime
 
 # 3. PyInstaller 桌面发布物（macOS 示例）：必须安装新构建的整包
