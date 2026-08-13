@@ -28,6 +28,8 @@ class TestProviderRegistry:
         assert "playwright_local" in registered
         assert "bitbrowser" in registered
         assert "virtualbrowser" in registered
+        assert registered[:3] == ["playwright_local", "bitbrowser", "virtualbrowser"]
+        assert registered[-1] == "hubstudio"
 
     def test_get_playwright_provider(self):
         """测试获取 Playwright Provider。"""
@@ -49,6 +51,13 @@ class TestProviderRegistry:
 
         assert provider is not None
         assert provider.name == "virtualbrowser"
+
+    def test_get_hubstudio_provider(self):
+        provider = get_provider("hubstudio")
+
+        assert provider is not None
+        assert provider.name == "hubstudio"
+        assert provider.display_name == "HubStudio"
 
     def test_get_unknown_provider(self):
         """测试获取未注册的 Provider。"""

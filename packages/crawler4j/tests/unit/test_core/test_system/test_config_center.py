@@ -23,6 +23,8 @@ def test_config_center_reads_defaults_and_persists_typed_values():
     config = get_config_center()
 
     assert config.get("browser.virtualbrowser.port") == 9002
+    assert config.get("browser.hubstudio.port") == 6873
+    assert config.get("browser.hubstudio.apikey") == ""
     assert config.get("atm.default_execution_timeout_seconds") == 600
     assert config.get("atm.env_recycle_timeout_seconds") == 60
     with pytest.raises(KeyError):
@@ -54,6 +56,13 @@ def test_config_center_reads_defaults_and_persists_typed_values():
         ("browser.virtualbrowser", "global", "", "port", "int"),
         ("network", "global", "", "proxy_mode", "string"),
     }
+
+
+def test_config_center_appends_hubstudio_browser_section():
+    from src.core.system.config_center import get_config_center
+
+    sections = get_config_center().registry.list_domains()[2].sections
+    assert [section.id for section in sections] == ["bitbrowser", "virtualbrowser", "hubstudio"]
 
 
 def test_config_center_validates_ranges_and_choices():

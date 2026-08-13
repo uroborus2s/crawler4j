@@ -1,6 +1,6 @@
 # 当前状态
 
-- 更新时间：2026-08-08
+- 更新时间：2026-08-13
 - 当前阶段：IMPLEMENTATION
 - 当前源码版本：root/runtime `0.4.41`；SDK `0.4.6`；Contracts `0.4.5`（SDK/Contracts 已发布，客户端未发布）
 - 当前协议：Core `0.4.0` / `core-native-v2`
@@ -9,6 +9,7 @@
 
 | ID | 状态 | 下一动作 |
 | --- | --- | --- |
+| `CR-026` / `TASK-046..048` | `committed` | 有可销毁 HubStudio 环境时补真实 E2E |
 | `CR-025` / `TASK-045` | `released` | PR #58 已合并 main；Contracts 0.4.5 / SDK 0.4.6 已发布 |
 | `CR-024` / `TASK-044` | `committed` | none |
 | `CR-023` / `TASK-043` | `host_slice_committed` | 外部 ctrip 改接与 Windows 发布门 |
@@ -25,6 +26,8 @@
 - 外部模块使用本轮能力的最低版本为 Contracts `0.4.5`、SDK `0.4.6`；两包已发布到 PyPI。
 - 承载本轮 Core 能力的根应用 / 客户端源码版本为 `0.4.41`；root wheel/sdist 已本地构建，未构建桌面资产。
 - `core-native-v2` 模块 ZIP 会保留非忽略的任意资源；CR-024 使用现有能力携带 Cheese JavaScript，无需新增 Core/SDK 契约或依赖。
+- HubStudio 已作为独立 `hubstudio` 指纹 Provider 接入 REM/ATM/System/UI；`containerCode` 持久化为稳定环境 ID，`browserID` 只在 Provider 内存映射中用于缓存接口。
+- HubStudio 复用现有 `EnvType.VIRTUAL_BROWSER` 与环境数据模型；未修改数据库 schema、公共环境契约或原环境列表列结构。
 - full runtime 已注册异步 `http.request`：模块传有序 headers/raw body/代理/HTTP2 约束，Core 返回标准类型 mapping 并拒绝协议降级；模块不直接使用第三方 HTTP 包。
 - root 0.4.40 wheel 隔离安装自动带入 HTTP2/Brotli 依赖；macOS PyInstaller app 已通过冻结 runtime check。签名发布资产和 Windows 证据未完成。
 - Hosted UI DataTable 批量编辑的公共契约已支持 `selection_mode=none/single/multi`；Core 传递保序、类型敏感去重的主键数组和表单 payload，业务模块负责校验与 `ctx.db` 写入。
@@ -36,6 +39,7 @@
 
 - CR-025 的 Contracts `0.4.5` 与 SDK `0.4.6` 已发布；客户端 `0.4.41` 的桌面资产、Git tag 和 GitHub release 仍未发布。
 - CR-024 的仓库验证不连接真实设备；Cheese Android 设备 E2E 需要用户在已授权设备上通过官方 IDE 插件运行。
+- CR-026 未运行真实 HubStudio E2E；完整指纹回读与 location 原地修复为厂商限制，高级指纹仅支持 `creation_params.hubstudio` 原始参数透传，未新增专属 ATM 表单。
 - ctrip 外部模块改接 `http.request`、真实站点 E2E、Windows 真机发布证据和完整 0.4.x 交付批次仍未闭环。
 - memory summary 只作恢复索引；需要精确结论时回读 ledger/evidence/docs。
 

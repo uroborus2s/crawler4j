@@ -26,6 +26,7 @@ class ExternalApp(str, Enum):
     """支持的外部应用枚举。"""
     BITBROWSER = "bitbrowser"
     VIRTUALBROWSER = "virtualbrowser"
+    HUBSTUDIO = "hubstudio"
 
 
 @dataclass
@@ -72,6 +73,15 @@ APP_CONFIG: dict[ExternalApp, dict[str, Any]] = {
             "Darwin": "/Applications/VirtualBrowser.app",
             "Windows": "",
         },
+    },
+    ExternalApp.HUBSTUDIO: {
+        "config_key_path": "browser.hubstudio.path",
+        "config_key_port": "browser.hubstudio.port",
+        "default_port": 6873,
+        "display_name": "HubStudio",
+        "process_names": {"Darwin": ["Hubstudio", "HubStudio"], "Windows": ["Hubstudio.exe", "HubStudio.exe"]},
+        "app_names": {"Darwin": "HubStudio"},
+        "default_paths": {"Darwin": "/Applications/Hubstudio.app", "Windows": ""},
     },
 }
 
@@ -284,7 +294,29 @@ class ExternalAppService:
         """检查应用管理 API 是否达到可执行业务接口的就绪状态。"""
         if app == ExternalApp.VIRTUALBROWSER:
             return await self._check_virtualbrowser_api_ready(port)
+        if app == ExternalApp.HUBSTUDIO:
+            return await self._check_hubstudio_api_ready(port)
         return await self._check_port_available(port)
+
+    async def _check_hubstudio_api_ready(self, port: int) -> bool:
+        """通过 HubStudio 管理接口判断真实就绪。"""
+        import httpx
+
+        from src.core.system.config_center import get_config_center
+
+        api_key = str(get_config_center().get("browser.hubstudio.apikey") or "").strip()
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = api_key
+        try:
+            async with httpx.AsyncClient(timeout=2.0, headers=headers, trust_env=False) as client:
+                response = await client.post(f"http://127.0.0.1:{port}/api/v1/env/list", json={})
+            return response.is_success and isinstance(response.json(), dict) and response.json().get("code") == 0
+        except (httpx.ConnectError, httpx.ReadTimeout):
+            return False
+        except Exception as error:
+            logger.debug(f"[ExternalApp] hubstudio API 就绪检测失败: {error}")
+            return False
 
     async def _check_virtualbrowser_api_ready(self, port: int) -> bool:
         """通过 VirtualBrowser 管理接口判断真实就绪，避免端口刚监听就创建环境。"""

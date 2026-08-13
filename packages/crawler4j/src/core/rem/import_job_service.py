@@ -487,7 +487,7 @@ class ExistingEnvImportJobService:
 
 def _resolve_env_type(provider_name: str) -> EnvType:
     normalized = str(provider_name or "").strip().lower()
-    if normalized == "virtualbrowser":
+    if normalized in {"virtualbrowser", "hubstudio"}:
         return EnvType.VIRTUAL_BROWSER
     if normalized == "bitbrowser":
         return EnvType.BIT_BROWSER

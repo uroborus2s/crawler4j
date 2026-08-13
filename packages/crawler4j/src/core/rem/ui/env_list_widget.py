@@ -54,7 +54,7 @@ class CreateEnvDialog(QDialog):
     """创建环境对话框。"""
     
     # 需要代理/指纹配置的 Provider
-    FINGERPRINT_PROVIDERS = {"bitbrowser", "virtualbrowser"}
+    FINGERPRINT_PROVIDERS = {"bitbrowser", "virtualbrowser", "hubstudio"}
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,7 +103,7 @@ class CreateEnvDialog(QDialog):
         
         # Provider 选择
         self.provider_combo = QComboBox()
-        self.provider_combo.addItems(["playwright_local", "bitbrowser", "virtualbrowser"])
+        self.provider_combo.addItems(["playwright_local", "bitbrowser", "virtualbrowser", "hubstudio"])
         self.provider_combo.setCurrentText("virtualbrowser")
         self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
         self.form.addRow("Provider:", self.provider_combo)
@@ -500,6 +500,7 @@ class CleanupPreviewDialog(QDialog):
             "bitbrowser": "BitBrowser",
             "playwright_local": "Playwright Local",
             "virtualbrowser": "VirtualBrowser",
+            "hubstudio": "HubStudio",
         }
         return labels.get(provider, provider or "-")
 
@@ -1772,6 +1773,7 @@ class EnvListWidget(QWidget):
         provider_label = {
             "virtualbrowser": "VirtualBrowser",
             "bitbrowser": "BitBrowser",
+            "hubstudio": "HubStudio",
         }.get(provider, provider)
 
         if provider in CreateEnvDialog.FINGERPRINT_PROVIDERS:

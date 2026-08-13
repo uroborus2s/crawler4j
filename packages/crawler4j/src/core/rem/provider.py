@@ -8,6 +8,7 @@ Provider 层面向具体技术栈，负责实际 spawn/keepalive/kill/healthchec
 import asyncio
 import json
 import secrets
+import sys
 
 from abc import ABC, abstractmethod
 from typing import Any
@@ -3095,10 +3096,20 @@ def init_providers() -> None:
         - playwright_local: Playwright 本地浏览器
         - bitbrowser: BitBrowser 指纹浏览器
         - virtualbrowser: VirtualBrowser 指纹浏览器
+        - hubstudio: HubStudio 指纹浏览器
     """
+    hubstudio_module = sys.modules.get("src.core.rem.hubstudio_provider")
+    hubstudio_provider = None
+    if hubstudio_module is None or hasattr(hubstudio_module, "HubStudioProvider"):
+        from src.core.rem.hubstudio_provider import HubStudioProvider
+
+        hubstudio_provider = HubStudioProvider()
+    _providers.pop("hubstudio", None)
     register_provider(PlaywrightProvider())
     register_provider(BitBrowserProvider())
     register_provider(VirtualBrowserProvider())
+    if hubstudio_provider is not None:
+        register_provider(hubstudio_provider)
 
 
 # 模块加载时自动注册

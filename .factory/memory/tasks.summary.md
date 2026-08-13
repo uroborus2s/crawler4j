@@ -1,6 +1,6 @@
 # 任务摘要
 
-更新时间：2026-08-08。只保留活跃、最近关闭和有后续动作的任务。
+更新时间：2026-08-13。只保留活跃、最近关闭和有后续动作的任务。
 
 ## 需要后续动作
 
@@ -16,6 +16,7 @@
 
 ## 最近已关闭
 
+- `CR-026` / `TASK-046..048`：HubStudio 指纹浏览器已接入 Provider registry、REM/ATM/System/UI，稳定 `containerCode` 与缓存 `browserID` 分离；不改 DB/EnvType/原环境列。最终 `167 passed`，Ruff、diff-check、双导入探针和独立复审通过；真实 HubStudio E2E 留待具备可销毁环境时执行。
 - `CR-020` / `TASK-040`：`env.cookie.ensure` 已通过真实接口探针、`1191` 完整单测和 `99/100` 独立复评，本地提交 `afae0136`；真实携程业务模块 E2E 由模块侧后续接线。
 - `TASK-037-release-contracts-0.4.3-sdk-0.4.4`：Contracts / SDK 已发布并完成安装验证。
 - `CR-019` / `TASK-038`：行按钮 `open_page` 已推送到 `origin/0.4.0`。

@@ -1,41 +1,41 @@
 # 会话卡
 
-- 时间：2026-08-08
+- 时间：2026-08-13
 - Actor：Codex
 - 阶段：IMPLEMENTATION
-- Work item：`CR-025`
-- Task：`TASK-045`
-- 状态：`release_records_pending_commit`
+- Work item：`CR-026`
+- Task：`TASK-046..048`
+- 状态：`committed`
 
 ## 项目位置
 
-- 项目整体进度：当前任务已完成实现与预评审验证；项目仍处于 IMPLEMENTATION
-- 当前任务：环境候选异步与候选 context 通用能力
-- 已完成：功能实现与复评、客户端版本 RED/GREEN、三包源码版本和本地构建
-- 正在执行：发布记录回写
+- 项目整体进度：HubStudio 指纹浏览器支持已完成实现、独立测试、独立复审与本地提交
+- 当前任务：新增 HubStudio Provider，并保持旧环境契约和列表结构不变
+- 已完成：API Client/Provider、REM/ATM/System/UI 集成、ID 分离、Cookie/缓存/生命周期、状态契约和安全整改
+- 正在执行：无
 - 停止原因：无
-- 唯一下一动作：提交发布记录并合并到 `main`
+- 唯一下一动作：有本地 HubStudio 客户端、API Key 和可销毁环境时补真实 E2E
 
 ## 已读取上下文
 
-- `.factory/memory/agent-session.md`、`.factory/memory/current-state.md`
-- `.factory/project.json`
-- `.factory/workitems/CR-025/brief.md`、plan、task brief、ledger、evidence、report
-- Core MMS/ATM 候选执行链、Contracts、SDK scanner/manifest 与相关文档/测试
+- `.factory/workitems/CR-026/brief.md`、`plan.md`、task briefs、ledger、evidence、report、review
+- HubStudio 官方 API 文档与官方浏览器状态说明
+- REM Provider/Manager/Handle/Model、ATM RunProfile、System Config/ExternalApp、相关 UI 和定向测试
 
 ## 未读 / 已排除上下文
 
-- `docs/` 全量正文、历史 memory、其他 work item 正文
-- 外部 `ctrip_crawler` 业务模块和真实站点状态
+- `docs/` 全量正文、其他历史 work item 正文
+- 真实 HubStudio 客户端、用户 API Key 和外部环境数据
 
 ## 禁止动作
 
-- 不修改 `ctrip_crawler`，不实现城市阈值、永久绑定或异城退出规则
-- 不发布，不执行 PR、merge；用户已授权当前任务 commit 和 push `origin/0.4.0`
-- Reviewer 只读实现输入，不修改文件
+- 不新增 `EnvType`，不修改数据库 schema、公共环境接口或原环境列表列
+- 不将运行时 `browserID` 持久化或覆盖稳定 `containerCode`
+- 不伪造完整指纹回读与 location 原地修复能力
+- 不推送远端、不开 PR
 
 ## 证据
 
-- `.factory/workitems/CR-025/evidence/TASK-045.md`
-- `.factory/workitems/CR-025/reports/TASK-045.md`
-- `.factory/workitems/CR-025/reviews/TASK-045-review-input.md`
+- `.factory/workitems/CR-026/evidence/batch-hubstudio.md`
+- `.factory/workitems/CR-026/reports/batch-hubstudio.md`
+- `.factory/workitems/CR-026/reviews/batch-hubstudio-independent-review.md`
