@@ -1,6 +1,6 @@
 # 当前状态
 
-- 更新时间：2026-08-13
+- 更新时间：2026-08-14
 - 当前阶段：IMPLEMENTATION
 - 当前源码版本：root/runtime `0.4.41`；SDK `0.4.6`；Contracts `0.4.5`（SDK/Contracts 已发布，客户端未发布）
 - 当前协议：Core `0.4.0` / `core-native-v2`
@@ -28,6 +28,7 @@
 - `core-native-v2` 模块 ZIP 会保留非忽略的任意资源；CR-024 使用现有能力携带 Cheese JavaScript，无需新增 Core/SDK 契约或依赖。
 - HubStudio 已作为独立 `hubstudio` 指纹 Provider 接入 REM/ATM/System/UI；`containerCode` 持久化为稳定环境 ID，`browserID` 只在 Provider 内存映射中用于缓存接口。
 - HubStudio 复用现有 `EnvType.VIRTUAL_BROWSER` 与环境数据模型；未修改数据库 schema、公共环境契约或原环境列表列结构。
+- HubStudio 创建时只要解析出有效代理，就强制下发 `advancedBo.languageType=0` 与 `geoRule=0`，让厂商按代理 IP 生成语言和地理位置指纹；无代理保持厂商默认。
 - full runtime 已注册异步 `http.request`：模块传有序 headers/raw body/代理/HTTP2 约束，Core 返回标准类型 mapping 并拒绝协议降级；模块不直接使用第三方 HTTP 包。
 - root 0.4.40 wheel 隔离安装自动带入 HTTP2/Brotli 依赖；macOS PyInstaller app 已通过冻结 runtime check。签名发布资产和 Windows 证据未完成。
 - Hosted UI DataTable 批量编辑的公共契约已支持 `selection_mode=none/single/multi`；Core 传递保序、类型敏感去重的主键数组和表单 payload，业务模块负责校验与 `ctx.db` 写入。

@@ -220,13 +220,19 @@ class HubStudioProvider(BaseProvider):
         params = dict(params) if isinstance(params, dict) else {}
         name = str(config.get("env_name") or params.pop("containerName", "hubstudio-env"))
         proxy = config.get("proxy") or params.pop("proxy", {})
+        proxy_payload = _proxy_payload(proxy, host_key="proxyServer")
+        if "proxyServer" in proxy_payload:
+            advanced = params.get("advancedBo")
+            advanced = dict(advanced) if isinstance(advanced, dict) else {}
+            advanced.update({"languageType": 0, "geoRule": 0})
+            params["advancedBo"] = advanced
         payload = {
             "containerName": name,
             "asDynamicType": 0,
             "proxyTypeName": "不使用代理",
             "labels": [],
             **params,
-            **_proxy_payload(proxy, host_key="proxyServer"),
+            **proxy_payload,
         }
         code = await self._get_api_client().create_environment(payload)
         return Environment(name=name, kind=self.kind, provider=self.name, status=EnvStatus.READY, external_id=code,

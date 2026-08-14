@@ -141,6 +141,7 @@ async def test_provider_create_start_close_destroy_status_connect_and_health(mon
     )
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
     env = await provider.create({"env_name": "hub-env"})
+    assert "advancedBo" not in client.create_environment.await_args.args[0]
     assert env.external_id == env.handle.browser_id == "42"
     assert (await provider.open(env)) is True
     assert env.handle.ws_url == "http://127.0.0.1:59591"
@@ -174,10 +175,17 @@ async def test_provider_create_uses_create_proxy_server_and_fingerprint_capabili
     provider = HubStudioProvider()
     client = SimpleNamespace(create_environment=AsyncMock(return_value="42"))
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
-    env = await provider.create({"env_name": "hub-env", "proxy": {"mode": "static", "static_value": "socks5://u:p@host:1080"}})
+    env = await provider.create({
+        "env_name": "hub-env",
+        "proxy": {"mode": "static", "static_value": "socks5://u:p@host:1080"},
+        "creation_params": {
+            "hubstudio": {"advancedBo": {"canvas": 0, "languageType": 2, "geoRule": 1}}
+        },
+    })
     payload = client.create_environment.await_args.args[0]
     assert payload["proxyServer"] == "host"
     assert "proxyHost" not in payload
+    assert payload["advancedBo"] == {"canvas": 0, "languageType": 0, "geoRule": 0}
     assert env.capabilities == {"page", "cookies", "fingerprint"}
 
 

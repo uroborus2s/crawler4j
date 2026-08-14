@@ -36,3 +36,11 @@
 ## 未运行
 
 - 真实 HubStudio E2E：当前未提供本地 HubStudio 客户端、API Key 和可销毁测试环境；本批次用 mock HTTP 契约测试代替。
+
+## 2026-08-14 跟随 IP 指纹补充验证
+
+- RED：Provider 定向测试 `1 failed, 16 passed`；失败点为有效代理创建载荷缺少 `languageType=0`、`geoRule=0`。
+- GREEN：Provider 定向测试 `17 passed in 0.18s`，exit `0`。
+- Ruff：`All checks passed!`，exit `0`。
+- `git diff --check` 与 ledger JSON 校验：exit `0`。
+- 独立复审：`approved`，Critical/Important/Minor 均为 `0`。
