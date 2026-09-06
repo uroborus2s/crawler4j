@@ -238,7 +238,7 @@ class EditEnvDialog(QDialog):
         proxy = self._env.proxy_config
         is_static = bool(proxy and proxy.mode == ProxyMode.STATIC)
         self._proxy_form.setRowVisible(self.proxy_input, is_static)
-        supports_cache_clear = self._env.provider == "virtualbrowser"
+        supports_cache_clear = self._env.provider in {"virtualbrowser", "hubstudio"}
         self.cache_section_label.setVisible(supports_cache_clear)
         self.cache_hint_label.setVisible(supports_cache_clear)
         self.clear_cache_btn.setVisible(supports_cache_clear)
@@ -358,7 +358,8 @@ class EditEnvDialog(QDialog):
         if not self._confirm_high_risk(
             "确认刷新环境指纹",
             "系统将随机化指纹、修正不合格参数并重新检测。\n"
-            "刷新指纹可能影响当前登录状态和账号风控结果。",
+            + ("厂商限制：不支持完整指纹回读及 location 原地修复。\n" if self._env.provider == "hubstudio" else "")
+            + "刷新指纹可能影响当前登录状态和账号风控结果。",
             "确认刷新",
         ):
             return
@@ -398,4 +399,4 @@ class EditEnvDialog(QDialog):
         self.proxy_entry_combo.setEnabled(enabled and has_entries)
         self.apply_proxy_btn.setEnabled(enabled and has_entries)
         self.refresh_fp_btn.setEnabled(enabled)
-        self.clear_cache_btn.setEnabled(enabled and self._env.provider == "virtualbrowser")
+        self.clear_cache_btn.setEnabled(enabled and self._env.provider in {"virtualbrowser", "hubstudio"})

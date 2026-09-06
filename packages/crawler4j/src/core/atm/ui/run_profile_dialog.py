@@ -1896,7 +1896,7 @@ class RunProfileDialog(QDialog):
         if create_env_type == EnvType.CHROME:
             options = ["playwright_local"]
         else:
-            options = ["virtualbrowser", "bitbrowser"]
+            options = ["virtualbrowser", "bitbrowser", "hubstudio"]
 
         self.resource_provider_combo.blockSignals(True)
         self.resource_provider_combo.clear()
@@ -2641,6 +2641,8 @@ class RunProfileDialog(QDialog):
         if provider == "bitbrowser":
             return EnvType.BIT_BROWSER
         if provider == "virtualbrowser":
+            return EnvType.VIRTUAL_BROWSER
+        if provider == "hubstudio":
             return EnvType.VIRTUAL_BROWSER
         return EnvType.CHROME
 

@@ -137,6 +137,7 @@ DEFAULT_CONFIG_REGISTRY = ConfigRegistry(
             sections=(
                 ConfigSectionSpec("bitbrowser", "BitBrowser", 10),
                 ConfigSectionSpec("virtualbrowser", "VirtualBrowser", 20),
+                ConfigSectionSpec("hubstudio", "HubStudio", 30),
             ),
         ),
         ConfigDomainSpec(
@@ -261,6 +262,32 @@ DEFAULT_CONFIG_REGISTRY = ConfigRegistry(
             default="",
             domain="browser",
             section="virtualbrowser",
+        ),
+        ConfigItemSpec(
+            key="browser.hubstudio.port",
+            label="API 端口",
+            value_type="int",
+            default=6873,
+            domain="browser",
+            section="hubstudio",
+            min_value=1024,
+            max_value=65535,
+        ),
+        ConfigItemSpec(
+            key="browser.hubstudio.apikey",
+            label="API 密钥",
+            value_type="secret",
+            default="",
+            domain="browser",
+            section="hubstudio",
+        ),
+        ConfigItemSpec(
+            key="browser.hubstudio.path",
+            label="程序位置",
+            value_type="path",
+            default="",
+            domain="browser",
+            section="hubstudio",
         ),
         ConfigItemSpec(
             key="atm.default_execution_timeout_seconds",

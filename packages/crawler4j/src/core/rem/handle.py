@@ -225,7 +225,7 @@ class BrowserHandle:
         import httpx
 
         timeout = httpx.Timeout(2.0, connect=1.0)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=False) as client:
             for probe_path in probe_paths:
                 probe_url = urlunsplit((parts.scheme, parts.netloc, probe_path, "", ""))
                 try:

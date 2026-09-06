@@ -9,6 +9,13 @@ from src.core.mms.models import ModuleStatus
 from src.core.rem.import_job_service import ExistingEnvImportJobService
 
 
+def test_resolve_env_type_keeps_hubstudio_provider_as_virtual_browser():
+    from src.core.rem.import_job_service import _resolve_env_type
+
+    assert _resolve_env_type("virtualbrowser") == EnvType.VIRTUAL_BROWSER
+    assert _resolve_env_type("hubstudio") == EnvType.VIRTUAL_BROWSER
+
+
 @pytest.mark.asyncio
 async def test_import_job_service_builds_fixed_env_run_profile():
     env = SimpleNamespace(

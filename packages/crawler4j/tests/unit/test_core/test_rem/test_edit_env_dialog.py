@@ -187,6 +187,24 @@ def test_edit_env_dialog_clear_cache_button_runs_virtualbrowser_action(qtbot, mo
     assert dialog.clear_cache_btn.minimumHeight() == 40
 
 
+def test_edit_env_dialog_hubstudio_supports_clear_cache_and_warns_about_fingerprint_limits(qtbot, monkeypatch):
+    import src.core.rem.ip_pool as ip_pool_module
+    from src.core.rem.models import Environment, EnvKind, EnvStatus
+    from src.core.rem.ui.edit_env_dialog import EditEnvDialog
+    from src.ui.components.confirm_dialog import ConfirmDialog
+
+    monkeypatch.setattr(ip_pool_module, "get_ip_pool_manager", lambda: SimpleNamespace(get_pool=lambda pool_id: None, list_pools=lambda: []))
+    dialog = EditEnvDialog(Environment(id=187, name="env", kind=EnvKind.BROWSER, provider="hubstudio", status=EnvStatus.READY))
+    qtbot.addWidget(dialog)
+    dialog._run_action = MagicMock()
+    monkeypatch.setattr(ConfirmDialog, "confirm", MagicMock(return_value=True))
+
+    assert not dialog.clear_cache_btn.isHidden()
+    assert dialog.clear_cache_btn.isEnabled()
+    dialog._refresh_fingerprint()
+    assert "厂商限制：不支持完整指纹回读及 location 原地修复" in ConfirmDialog.confirm.call_args.args[2]
+
+
 def test_edit_env_dialog_hides_clear_cache_for_unsupported_provider(qtbot, monkeypatch):
     import src.core.rem.ip_pool as ip_pool_module
     from src.core.rem.models import Environment, EnvKind, EnvStatus

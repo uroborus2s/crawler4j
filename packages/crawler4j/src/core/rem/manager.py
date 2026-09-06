@@ -45,7 +45,7 @@ from src.core.rem.models import (
 from src.core.rem.pool import EnvPool, LeaseManager
 from src.core.rem.provider import BaseProvider, get_provider, list_providers
 
-FINGERPRINT_BROWSER_PROVIDERS = {"bitbrowser", "virtualbrowser"}
+FINGERPRINT_BROWSER_PROVIDERS = {"bitbrowser", "virtualbrowser", "hubstudio"}
 DEFAULT_PROVIDER_RUNTIME_TIMEOUT = 30
 RECOVERY_PROVIDER_RUNTIME_TIMEOUT = 3
 EXISTING_ENV_IMPORT_METADATA_NAMESPACE = "existing_env_import"
@@ -1518,6 +1518,8 @@ class EnvironmentManager:
             app = ExternalApp.BITBROWSER
         elif provider_name == "virtualbrowser":
             app = ExternalApp.VIRTUALBROWSER
+        elif provider_name == "hubstudio":
+            app = ExternalApp.HUBSTUDIO
 
         if app is None:
             return

@@ -59,12 +59,13 @@ def _make_env(
     *,
     created_at: int = 1_700_000_000,
     external_id: str | None = None,
+    provider: str = "virtualbrowser",
 ):
     return SimpleNamespace(
         id=env_id,
         name=f"{env_id}-name",
         kind=EnvKind.BROWSER,
-        provider="virtualbrowser",
+        provider=provider,
         status=status,
         task_run_id="",
         proxy_config=proxy_config,
@@ -158,6 +159,18 @@ def test_env_list_table_replaces_kind_with_created_at_and_keeps_compact_columns(
     assert columns["created_at"]["label"] == "创建时间"
     assert columns["fingerprint_validation"]["width"] == 100
     assert columns["task"]["width"] == 90
+
+
+def test_create_env_dialog_provider_options_append_hubstudio(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    dialog = env_list_widget.CreateEnvDialog()
+    qtbot.addWidget(dialog)
+
+    assert [dialog.provider_combo.itemText(index) for index in range(dialog.provider_combo.count())] == [
+        "playwright_local", "bitbrowser", "virtualbrowser", "hubstudio"
+    ]
+    assert dialog.provider_combo.currentText() == "virtualbrowser"
+    assert "hubstudio" in dialog.FINGERPRINT_PROVIDERS
 
 
 def test_env_list_widget_rows_show_created_at(qtbot, monkeypatch):
@@ -818,6 +831,22 @@ def test_env_list_widget_shows_repair_location_action_for_location_risk(qtbot, m
         "edit",
         "destroy",
     ]
+
+
+def test_env_list_widget_hubstudio_location_risk_has_no_repair_action(qtbot, monkeypatch):
+    env_list_widget = _patch_dialog_dependencies(monkeypatch, "env-20260414-3")
+    metadata = {FINGERPRINT_VALIDATION_NAMESPACE: {FINGERPRINT_VALIDATION_STATUS: FINGERPRINT_VALIDATION_RISK,
+                                                     FINGERPRINT_VALIDATION_REASON: "location 为 0,0"}}
+    pool = SimpleNamespace(list_metadata=MagicMock(return_value=metadata))
+    import src.core.rem.manager as manager_module
+    monkeypatch.setattr(manager_module, "get_environment_manager", lambda: SimpleNamespace(pool=pool))
+    widget = env_list_widget.EnvListWidget()
+    qtbot.addWidget(widget)
+
+    widget._on_data_loaded([_make_env(101, EnvStatus.READY, provider="hubstudio")])
+
+    assert "repair_location" not in [action["id"] for action in widget.table.displayed_rows()[0]["actions"]]
+    assert "HubStudio API" in widget._operation_message("create", provider="hubstudio")
 
 
 @pytest.mark.asyncio

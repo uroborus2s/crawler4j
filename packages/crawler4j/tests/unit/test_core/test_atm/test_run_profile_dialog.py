@@ -433,6 +433,23 @@ def test_run_profile_dialog_builds_create_mode_profile(qtbot, monkeypatch):
     assert profile.execution.workflow == "repair"
 
 
+def test_run_profile_dialog_appends_hubstudio_without_virtualbrowser_form(qtbot, monkeypatch):
+    _patch_dialog_dependencies(monkeypatch)
+    from src.core.atm.ui.run_profile_dialog import RunProfileDialog
+
+    dialog = RunProfileDialog()
+    qtbot.addWidget(dialog)
+    dialog.resource_mode_combo.setCurrentIndex(dialog.resource_mode_combo.findData(AcquisitionMode.CREATE))
+
+    assert [dialog.resource_provider_combo.itemText(index) for index in range(dialog.resource_provider_combo.count())] == [
+        "virtualbrowser", "bitbrowser", "hubstudio"
+    ]
+    dialog.resource_provider_combo.setCurrentText("hubstudio")
+    dialog._sync_create_fields()
+    assert dialog._provider_to_env_type("hubstudio") == EnvType.VIRTUAL_BROWSER
+    assert dialog.virtualbrowser_group.isHidden()
+
+
 def test_run_profile_dialog_yaml_tab_uses_shared_yaml_editor(qtbot, monkeypatch):
     _patch_dialog_dependencies(monkeypatch)
 

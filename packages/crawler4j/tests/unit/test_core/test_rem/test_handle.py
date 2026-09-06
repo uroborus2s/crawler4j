@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -35,6 +35,25 @@ def test_candidate_cdp_endpoints_strip_json_version_suffix():
     assert candidates[0] == "http://127.0.0.1:9222"
     assert "http://localhost:9222" in candidates
     assert "ws://127.0.0.1:9222" not in candidates
+
+
+@pytest.mark.asyncio
+async def test_probe_websocket_debugger_url_does_not_inherit_proxy_environment():
+    response = MagicMock()
+    response.json.return_value = {
+        "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/abc"
+    }
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.get = AsyncMock(return_value=response)
+
+    with patch("httpx.AsyncClient", return_value=client) as create_client:
+        result = await BrowserHandle._probe_websocket_debugger_url("http://127.0.0.1:9222")
+
+    assert result == "ws://127.0.0.1:9222/devtools/browser/abc"
+    assert create_client.call_args.kwargs["trust_env"] is False
+    client.get.assert_awaited_once_with("http://127.0.0.1:9222/json/version")
 
 
 @pytest.mark.asyncio

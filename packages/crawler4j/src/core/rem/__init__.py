@@ -41,6 +41,7 @@ _EXPORT_MODULES = {
     "LeaseManager": "src.core.rem.pool",
     "BaseProvider": "src.core.rem.provider",
     "BitBrowserProvider": "src.core.rem.provider",
+    "HubStudioProvider": "src.core.rem.hubstudio_provider",
     "VirtualBrowserProvider": "src.core.rem.provider",
     "get_provider": "src.core.rem.provider",
     "list_providers": "src.core.rem.provider",

@@ -8,6 +8,7 @@ Provider 层面向具体技术栈，负责实际 spawn/keepalive/kill/healthchec
 import asyncio
 import json
 import secrets
+import sys
 
 from abc import ABC, abstractmethod
 from typing import Any
@@ -20,14 +21,11 @@ from src.core.rem.models import Environment, EnvKind, EnvStatus, ProviderEnvInfo
 from src.core.rem.proxy_probe import ProxyProbeResult, probe_ip_entry_geo
 from src.core.rem.virtualbrowser_fingerprint import (
     VIRTUALBROWSER_COMMON_HARDWARE_PROFILES,
-    VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS,
     VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY,
     build_virtualbrowser_geo_fingerprint_overrides,
     build_virtualbrowser_ip_auto_fingerprint_overrides,
     build_virtualbrowser_randomized_fingerprint_patch,
-    build_virtualbrowser_speech_voices_override,
     materialize_virtualbrowser_fingerprint,
-    should_enforce_virtualbrowser_speech_voices,
 )
 
 VIRTUALBROWSER_SUPPORTED_CHROME_VERSIONS = tuple(range(146, 138, -1))
@@ -410,6 +408,14 @@ def _created_parameter_warnings(
 
     warnings: list[str] = []
     expected = build_virtualbrowser_geo_fingerprint_overrides(geo)
+    if require_controlled:
+        expected = build_virtualbrowser_ip_auto_fingerprint_overrides()
+        for key, value in expected.items():
+            actual = entry.get(key)
+            if not isinstance(actual, dict) or any(
+                actual.get(item) != expected_value for item, expected_value in value.items()
+            ):
+                warnings.append(f"{key} 未使用预期自动模式")
     expected_time_zone = expected.get("time-zone")
     actual_time_zone = entry.get("time-zone")
     if isinstance(expected_time_zone, dict):
@@ -437,15 +443,14 @@ def _created_parameter_warnings(
                 actual_value = str(actual_location.get(key) or "").strip()
                 if expected_value and actual_value != expected_value:
                     warnings.append(f"location.{key}={actual_value!r}，预期 {expected_value!r}")
-            precision = _safe_int(actual_location.get("precision"))
-            if precision is None or not 1000 <= precision <= 2000:
-                warnings.append(f"location.precision={actual_location.get('precision')!r}，预期 1000-2000")
+            if "longitude" in expected_location:
+                precision = _safe_int(actual_location.get("precision"))
+                if precision is None or not 1000 <= precision <= 2000:
+                    warnings.append(f"location.precision={actual_location.get('precision')!r}，预期 1000-2000")
 
     ua_value = str(_mode_value(entry.get("ua")) or "")
     if require_controlled and not ua_value:
         warnings.append("ua.value 缺失")
-    elif "WOW64" in ua_value:
-        warnings.append("ua.value 包含 WOW64，预期 Win64; x64")
     chrome_version = _safe_int(entry.get("chrome_version"))
     ua_full_version = str(_mode_value(entry.get("ua-full-version")) or "").strip()
     if require_controlled and not ua_full_version:
@@ -453,35 +458,14 @@ def _created_parameter_warnings(
     elif chrome_version is not None and ua_full_version == f"{chrome_version}.0.0.0":
         warnings.append(f"ua-full-version={ua_full_version!r} 为缩减版本，缺少实际 build")
 
-    location = entry.get("location")
-    if isinstance(location, dict):
-        longitude = str(location.get("longitude") or "").strip()
-        latitude = str(location.get("latitude") or "").strip()
-        if longitude in {"0", "0.0"} and latitude in {"0", "0.0"}:
-            warnings.append("location 为 0,0，占位定位不能作为稳定环境参数")
-
     cpu = _safe_int(_mode_value(entry.get("cpu")))
     memory = _safe_int(_mode_value(entry.get("memory")))
     if require_controlled and (cpu is None or memory is None):
         warnings.append("cpu/memory 缺失")
-    elif cpu is not None and memory is not None:
-        if (cpu, memory) not in VIRTUALBROWSER_COMMON_HARDWARE_PROFILES:
-            warnings.append(f"cpu/memory={cpu}/{memory} 不在常见硬件组合池")
-
-    screen = entry.get("screen")
-    screen_width = _safe_int(screen.get("width")) if isinstance(screen, dict) else None
-    screen_height = _safe_int(screen.get("height")) if isinstance(screen, dict) else None
-    if require_controlled and (screen_width is None or screen_height is None):
-        warnings.append("screen 尺寸缺失")
-    elif require_controlled and isinstance(screen, dict) and screen.get("mode") not in (1, "1"):
-        warnings.append(f"screen.mode={screen.get('mode')!r}，预期自定义模式 1")
-    elif (
-        require_controlled
-        and screen_width is not None
-        and screen_height is not None
-        and (screen_width, screen_height) not in VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS
-    ):
-        warnings.append(f"screen={screen_width}x{screen_height} 不在常见分辨率池")
+    elif (cpu is not None and cpu <= 0) or (memory is not None and memory <= 0):
+        warnings.append("cpu/memory 必须为正数")
+    elif cpu is not None and memory is not None and (cpu, memory) not in VIRTUALBROWSER_COMMON_HARDWARE_PROFILES:
+        warnings.append(f"cpu/memory={cpu}/{memory} 不在常见硬件组合池")
 
     proxy = entry.get("proxy")
     if isinstance(proxy, dict):
@@ -499,10 +483,6 @@ def _created_parameter_warnings(
     fonts = _mode_one_dict(entry.get("fonts"))
     if fonts is not None and not fonts.get("value"):
         warnings.append("fonts.mode=1 但缺少 value 字体列表")
-    voices = _mode_one_dict(entry.get("speech_voices"))
-    if should_enforce_virtualbrowser_speech_voices() and voices is not None and not voices.get("value"):
-        warnings.append("speech_voices.mode=1 但缺少 value 语音列表")
-
     for key, required in (
         ("canvas", ("r", "g", "b", "a")),
         ("webgl-img", ("r", "g", "b", "a")),
@@ -520,7 +500,7 @@ def _runtime_fingerprint_warnings(entry: dict[str, Any], runtime: Any) -> list[s
         return ["页面自检未返回可用的 JavaScript 指纹数据"]
 
     warnings: list[str] = []
-    expected_ua = str(_mode_value(entry.get("ua")) or "").strip()
+    expected_ua = str(_mode_value(_mode_one_dict(entry.get("ua"))) or "").strip()
     actual_ua = str(runtime.get("ua") or "").strip()
     if expected_ua and actual_ua != expected_ua:
         warnings.append("navigator.userAgent 与环境配置不一致")
@@ -536,7 +516,7 @@ def _runtime_fingerprint_warnings(entry: dict[str, Any], runtime: Any) -> list[s
     if expected_full_version and expected_full_version not in actual_full_versions:
         warnings.append("navigator.userAgentData.fullVersionList 与 ua-full-version 不一致")
 
-    expected_language_section = entry.get("ua-language")
+    expected_language_section = _mode_one_dict(entry.get("ua-language"))
     expected_language = (
         str(expected_language_section.get("language") or "").strip()
         if isinstance(expected_language_section, dict)
@@ -546,7 +526,7 @@ def _runtime_fingerprint_warnings(entry: dict[str, Any], runtime: Any) -> list[s
     if expected_language and actual_language != expected_language:
         warnings.append("navigator.language 与环境配置不一致")
 
-    expected_timezone_section = entry.get("time-zone")
+    expected_timezone_section = _mode_one_dict(entry.get("time-zone"))
     expected_timezone = (
         str(expected_timezone_section.get("utc") or "").strip() if isinstance(expected_timezone_section, dict) else ""
     )
@@ -556,7 +536,7 @@ def _runtime_fingerprint_warnings(entry: dict[str, Any], runtime: Any) -> list[s
 
     expected_screen = entry.get("screen")
     actual_screen = runtime.get("screen")
-    if isinstance(expected_screen, dict) and isinstance(actual_screen, dict):
+    if _mode_one_dict(expected_screen) is not None and isinstance(actual_screen, dict):
         expected_width = _safe_int(expected_screen.get("width"))
         expected_height = _safe_int(expected_screen.get("height"))
         actual_width = _safe_int(actual_screen.get("width"))
@@ -571,21 +551,6 @@ def _runtime_fingerprint_warnings(entry: dict[str, Any], runtime: Any) -> list[s
                 f"页面={actual_width}x{actual_height}，"
                 f"devicePixelRatio={runtime.get('devicePixelRatio')!r}"
             )
-
-    expected_voices_section = _mode_one_dict(entry.get("speech_voices"))
-    expected_voice_names = {
-        str(voice.get("name") or "").strip()
-        for voice in (expected_voices_section or {}).get("value") or []
-        if isinstance(voice, dict) and str(voice.get("name") or "").strip()
-    }
-    actual_voice_names = {
-        str(voice.get("name") or "").strip()
-        for voice in runtime.get("voices") or []
-        if isinstance(voice, dict) and str(voice.get("name") or "").strip()
-    }
-    if should_enforce_virtualbrowser_speech_voices():
-        if expected_voice_names and not expected_voice_names.issubset(actual_voice_names):
-            warnings.append("speechSynthesis.getVoices 与环境配置不一致")
 
     webrtc = runtime.get("webrtc")
     if not isinstance(webrtc, dict) or webrtc.get("supported") is False:
@@ -1791,11 +1756,6 @@ class VirtualBrowserClient:
             has_custom_proxy = any(bool(default_proxy.get(k)) for k in ("host", "port", "value", "API"))
             default_proxy["mode"] = 2 if has_custom_proxy else 1
 
-        materialize_kwargs: dict[str, Any] = {
-            "default_chrome_version": select_virtualbrowser_chrome_version(),
-        }
-        if geo:
-            materialize_kwargs["geo"] = geo
         fingerprint_for_create = fingerprint
         if isinstance(fingerprint, dict) and fingerprint.get(VIRTUALBROWSER_RANDOMIZE_FINGERPRINT_KEY):
             # 兼容旧运行模板：随机指纹此前仍会保存 UI 默认的 145；随机模式必须由
@@ -1804,7 +1764,7 @@ class VirtualBrowserClient:
             fingerprint_for_create.pop("chrome_version", None)
         chrome_version, fingerprint_payload = materialize_virtualbrowser_fingerprint(
             fingerprint_for_create,
-            **materialize_kwargs,
+            default_chrome_version=select_virtualbrowser_chrome_version(),
         )
         core_version = fingerprint_payload.pop("core_version", "auto")
 
@@ -2294,7 +2254,6 @@ class VirtualBrowserProvider(BaseProvider):
         self,
         client: Any,
         browser_id: int,
-        manual_geo: dict[str, Any] | None,
     ) -> list[str]:
         """随机指纹后复用创建期规则回读、修正并验收。"""
         if not await client.randomize_fingerprint(browser_id):
@@ -2305,11 +2264,6 @@ class VirtualBrowserProvider(BaseProvider):
             raise RuntimeError("VirtualBrowser 随机指纹未返回目标环境参数")
 
         expected = build_virtualbrowser_ip_auto_fingerprint_overrides()
-        if manual_geo:
-            expected.update(build_virtualbrowser_geo_fingerprint_overrides(manual_geo))
-        speech_voices = build_virtualbrowser_speech_voices_override()
-        if speech_voices is not None:
-            expected["speech_voices"] = speech_voices
         patch = build_virtualbrowser_randomized_fingerprint_patch(randomized_entry, expected)
         if patch and not await client.update_browser(browser_id, patch):
             raise RuntimeError("VirtualBrowser updateBrowser 修正随机指纹失败")
@@ -2317,7 +2271,7 @@ class VirtualBrowserProvider(BaseProvider):
         return await self._log_created_parameter_validation(
             client,
             browser_id,
-            manual_geo,
+            None,
             require_controlled=True,
         )
 
@@ -2378,12 +2332,15 @@ class VirtualBrowserProvider(BaseProvider):
         if should_randomize_fingerprint:
             fingerprint = dict(fingerprint)
             fingerprint["chrome_version"] = select_virtualbrowser_chrome_version()
-        manual_geo = self._manual_ip_table_geo(config.get("geo"))
+        raw_geo = config.get("geo")
+        if raw_geo is not None and not isinstance(raw_geo, dict):
+            raise ValueError("IP 表指纹配置必须是对象")
+        geo_country = str((raw_geo or {}).get("country") or "").strip().upper()
         source_proxy_entry = _ip_entry_from_virtualbrowser_proxy(proxy)
         if source_proxy_entry is not None:
             proxy = _virtualbrowser_proxy_payload(
                 source_proxy_entry,
-                country=manual_geo["country"] if manual_geo else "",
+                country=geo_country,
             )
         if proxy:
             await self._verify_creation_proxy(proxy)
@@ -2391,9 +2348,6 @@ class VirtualBrowserProvider(BaseProvider):
         if not should_randomize_fingerprint:
             fingerprint = dict(fingerprint or {})
             fingerprint.update(build_virtualbrowser_ip_auto_fingerprint_overrides())
-            speech_voices = build_virtualbrowser_speech_voices_override()
-            if speech_voices is not None:
-                fingerprint["speech_voices"] = speech_voices
 
         logger.info(f"[VirtualBrowser] Creating env '{name}'...")
 
@@ -2406,19 +2360,19 @@ class VirtualBrowserProvider(BaseProvider):
                     groups,
                     proxy,
                     fingerprint,
-                    geo=None if should_randomize_fingerprint else manual_geo,
+                    geo=None,
                 )
                 if should_randomize_fingerprint:
                     validation_warnings = await self._randomize_and_reconcile_fingerprint(
                         client,
                         browser_id,
-                        manual_geo,
                     )
                 else:
                     validation_warnings = await self._log_created_parameter_validation(
                         client,
                         browser_id,
-                        manual_geo,
+                        None,
+                        require_controlled=True,
                     )
             except Exception:
                 if browser_id is not None:
@@ -3072,7 +3026,6 @@ class VirtualBrowserProvider(BaseProvider):
                 env.fingerprint_validation_warnings = await self._randomize_and_reconcile_fingerprint(
                     client,
                     browser_id_int,
-                    self._manual_geo_for_env(env),
                 )
                 logger.info(f"[VirtualBrowser] 指纹已刷新并完成校准: id={browser_id}")
 
@@ -3095,10 +3048,20 @@ def init_providers() -> None:
         - playwright_local: Playwright 本地浏览器
         - bitbrowser: BitBrowser 指纹浏览器
         - virtualbrowser: VirtualBrowser 指纹浏览器
+        - hubstudio: HubStudio 指纹浏览器
     """
+    hubstudio_module = sys.modules.get("src.core.rem.hubstudio_provider")
+    hubstudio_provider = None
+    if hubstudio_module is None or hasattr(hubstudio_module, "HubStudioProvider"):
+        from src.core.rem.hubstudio_provider import HubStudioProvider
+
+        hubstudio_provider = HubStudioProvider()
+    _providers.pop("hubstudio", None)
     register_provider(PlaywrightProvider())
     register_provider(BitBrowserProvider())
     register_provider(VirtualBrowserProvider())
+    if hubstudio_provider is not None:
+        register_provider(hubstudio_provider)
 
 
 # 模块加载时自动注册

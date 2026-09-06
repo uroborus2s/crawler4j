@@ -65,21 +65,9 @@ VIRTUALBROWSER_LANGUAGE_BY_COUNTRY = {
     "VN": _language_profile("vi-VN"),
 }
 VIRTUALBROWSER_FALLBACK_LANGUAGE = _language_profile("en-US")
-VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS = (
-    (1920, 1080),
-    (1920, 1080),
-    (1920, 1080),
-    (1536, 864),
-    (1536, 864),
-    (2560, 1440),
-    (1920, 1200),
-    (1440, 900),
-    (1680, 1050),
-    (1366, 768),
-)
 VIRTUALBROWSER_COMMON_HARDWARE_PROFILES = (
     (4, 8),
-    (6, 16),
+    (4, 16),
     (8, 16),
     (8, 32),
     (12, 32),
@@ -242,54 +230,31 @@ def generate_mac_address() -> str:
     return "-".join(f"{octet:02X}" for octet in octets)
 
 
-def _fingerprint_int(section: Any, key: str = "value") -> int | None:
-    try:
-        return int(section.get(key)) if isinstance(section, dict) else None
-    except (TypeError, ValueError):
-        return None
-
-
 def _contains_expected(actual: Any, expected: Any) -> bool:
     if isinstance(expected, dict):
         return isinstance(actual, dict) and all(actual.get(key) == value for key, value in expected.items())
     return actual == expected
 
 
+def _fingerprint_int(section: Any) -> int | None:
+    try:
+        return int(section.get("value")) if isinstance(section, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
 def build_virtualbrowser_randomized_fingerprint_patch(
     entry: dict[str, Any],
     expected: dict[str, Any],
 ) -> dict[str, Any]:
-    """随机完成后只修正不合格或业务必须固定的字段。"""
+    """随机完成后校正常用硬件组合，并恢复指定自动模式。"""
     patch: dict[str, Any] = {}
-    ua = entry.get("ua")
-    ua_value = str(ua.get("value") or "") if isinstance(ua, dict) else ""
-    if "WOW64" in ua_value:
-        patch["ua"] = {"mode": 1, "value": ua_value.replace("WOW64", "Win64; x64")}
-
     cpu = _fingerprint_int(entry.get("cpu"))
     memory = _fingerprint_int(entry.get("memory"))
     if (cpu, memory) not in VIRTUALBROWSER_COMMON_HARDWARE_PROFILES:
         cpu, memory = secrets.choice(VIRTUALBROWSER_COMMON_HARDWARE_PROFILES)
         patch["cpu"] = {"mode": 1, "value": cpu}
         patch["memory"] = {"mode": 1, "value": memory}
-
-    screen = entry.get("screen")
-    width = _fingerprint_int(screen, "width")
-    height = _fingerprint_int(screen, "height")
-    if (
-        not isinstance(screen, dict)
-        or screen.get("mode") not in (1, "1")
-        or (width, height) not in VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS
-    ):
-        if (width, height) not in VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS:
-            width, height = secrets.choice(VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS)
-        patch["screen"] = {
-            "mode": 1,
-            "width": width,
-            "height": height,
-            "_value": f"{width} x {height}",
-        }
-
     for key, value in expected.items():
         if not _contains_expected(entry.get(key), value):
             patch[key] = value
@@ -323,11 +288,14 @@ def build_virtualbrowser_random_fingerprint_defaults(
 
 
 def build_virtualbrowser_ip_auto_fingerprint_overrides() -> dict[str, Any]:
-    """使用官方文档定义的「跟随 IP」模式。"""
+    """使用 VirtualBrowser 的默认 UA、屏幕和随 IP 的区域模式。"""
     return {
+        "ua": {"mode": 0},
+        "screen": {"mode": 0},
         "ua-language": {"mode": 2},
         "time-zone": {"mode": 2},
         "location": {"mode": 2, "enable": 1},
+        "speech_voices": {"mode": 1, "value": {}},
     }
 
 
