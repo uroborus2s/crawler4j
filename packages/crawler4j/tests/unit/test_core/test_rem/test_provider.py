@@ -99,13 +99,10 @@ def test_created_parameter_warnings_flag_inconsistent_fingerprint_values(monkeyp
     )
 
     rendered = "\n".join(warnings)
-    assert "WOW64" in rendered
     assert "ua-full-version" in rendered
-    assert "location 为 0,0" in rendered
     assert "cpu/memory=2/64" in rendered
     assert "proxy.host='27.18.13.203'" in rendered
     assert "fonts.mode=1" in rendered
-    assert "speech_voices.mode=1" in rendered
     assert "canvas.mode=1" in rendered
     assert "webgl-img.mode=1" in rendered
     assert "audio-context.mode=1" in rendered
@@ -121,14 +118,20 @@ def test_created_parameter_warnings_require_automatic_controlled_fields():
     )
 
     assert warnings == [
+        "ua 未使用预期自动模式",
+        "screen 未使用预期自动模式",
+        "ua-language 未使用预期自动模式",
+        "time-zone 未使用预期自动模式",
+        "location 未使用预期自动模式",
+        "speech_voices 未使用预期自动模式",
+        "location 缺失，未持久化 IP 表坐标",
         "ua.value 缺失",
         "ua-full-version.value 缺失",
         "cpu/memory 缺失",
-        "screen 尺寸缺失",
     ]
 
 
-def test_created_parameter_warnings_require_custom_screen_mode():
+def test_created_parameter_warnings_accept_vendor_default_modes():
     warnings = provider_module._created_parameter_warnings(
         {
             "id": 55,
@@ -137,14 +140,50 @@ def test_created_parameter_warnings_require_custom_screen_mode():
             "ua-full-version": {"mode": 1, "value": "145.0.7632.109"},
             "cpu": {"mode": 1, "value": 8},
             "memory": {"mode": 1, "value": 16},
-            "screen": {"mode": 0, "width": 1920, "height": 1080},
+            "screen": {"mode": 0},
+            "ua-language": {"mode": 2},
+            "time-zone": {"mode": 2},
+            "location": {"mode": 2, "enable": 1},
+            "speech_voices": {"mode": 1, "value": {}},
         },
         browser_id=55,
         geo=None,
         require_controlled=True,
     )
 
-    assert warnings == ["screen.mode=0，预期自定义模式 1"]
+    assert warnings == []
+
+
+@pytest.mark.parametrize(
+    ("cpu", "memory", "expected"),
+    [
+        (0, 16, ["cpu/memory 必须为正数"]),
+        (-1, 16, ["cpu/memory 必须为正数"]),
+        (8, 16, []),
+        (12, 16, ["cpu/memory=12/16 不在常见硬件组合池"]),
+    ],
+)
+def test_created_parameter_warnings_accepts_vendor_hardware_but_rejects_invalid_values(cpu, memory, expected):
+    warnings = provider_module._created_parameter_warnings(
+        {
+            "id": 55,
+            "chrome_version": 145,
+            "ua": {"mode": 0, "value": "Mozilla/5.0 Chrome/145.0.0.0"},
+            "ua-full-version": {"mode": 1, "value": "145.0.7632.109"},
+            "cpu": {"mode": 1, "value": cpu},
+            "memory": {"mode": 1, "value": memory},
+            "screen": {"mode": 0},
+            "ua-language": {"mode": 2},
+            "time-zone": {"mode": 2},
+            "location": {"mode": 2, "enable": 1},
+            "speech_voices": {"mode": 1, "value": {}},
+        },
+        browser_id=55,
+        geo=None,
+        require_controlled=True,
+    )
+
+    assert warnings == expected
 
 
 def test_virtualbrowser_manual_ip_table_geo_allows_fixed_defaults_without_location():
@@ -322,16 +361,17 @@ async def test_virtualbrowser_create_only_verifies_proxy_without_ip_table_finger
     args, kwargs = client.add_browser.await_args
     assert kwargs["geo"] is None
     assert args[2]["checkFailed"] is False
+    assert args[3]["ua"] == {"mode": 0}
+    assert args[3]["screen"] == {"mode": 0}
     assert args[3]["ua-language"] == {"mode": 2}
     assert args[3]["time-zone"] == {"mode": 2}
     assert args[3]["location"] == {"mode": 2, "enable": 1}
-    assert args[3]["speech_voices"]["mode"] == 1
-    assert len(args[3]["speech_voices"]["value"]) == 5
+    assert args[3]["speech_voices"] == {"mode": 1, "value": {}}
     client.get_browser_full_parameters.assert_awaited_once_with(303)
 
 
 @pytest.mark.asyncio
-async def test_virtualbrowser_create_uses_native_speech_voices_on_macos(monkeypatch):
+async def test_virtualbrowser_create_uses_vendor_speech_voice_mode_on_macos(monkeypatch):
     monkeypatch.setattr(
         "src.core.rem.virtualbrowser_fingerprint.platform.system",
         lambda: "Darwin",
@@ -343,7 +383,7 @@ async def test_virtualbrowser_create_uses_native_speech_voices_on_macos(monkeypa
     )
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
 
-    env = await provider.create(
+    await provider.create(
         {
             "env_name": "env-macos-native-voices",
             "creation_params": {"virtualbrowser": {"chrome_version": 145}},
@@ -351,8 +391,7 @@ async def test_virtualbrowser_create_uses_native_speech_voices_on_macos(monkeypa
     )
 
     fingerprint = client.add_browser.await_args.args[3]
-    assert "speech_voices" not in fingerprint
-    assert env.fingerprint_validation_warnings == []
+    assert fingerprint["speech_voices"] == {"mode": 1, "value": {}}
 
 
 @pytest.mark.asyncio
@@ -387,13 +426,7 @@ async def test_virtualbrowser_create_uses_ip_table_fingerprint_values_and_only_v
     await provider.create(
         {
             "env_name": "env-manual-geo",
-            "geo": {
-                "country": "CN",
-                "timezone": "Asia/Shanghai",
-                "language": "zh-CN,zh,en-US,en",
-                "latitude": 39.9,
-                "longitude": 116.36,
-            },
+            "geo": {"country": "CN"},
             "creation_params": {
                 "proxy": {
                     "protocol": "http",
@@ -409,32 +442,10 @@ async def test_virtualbrowser_create_uses_ip_table_fingerprint_values_and_only_v
     assert probe_entries[0].address == "10.0.0.8"
     client.randomize_fingerprint.assert_awaited_once_with(303)
     controlled = client.update_browser.await_args.args[1]
-    assert (controlled["cpu"]["value"], controlled["memory"]["value"]) in (
-        provider_module.VIRTUALBROWSER_COMMON_HARDWARE_PROFILES
-    )
-    assert (controlled["screen"]["width"], controlled["screen"]["height"]) in (
-        provider_module.VIRTUALBROWSER_COMMON_SCREEN_RESOLUTIONS
-    )
     assert "proxy" not in controlled
-    assert controlled["ua-language"] == {
-        "mode": 1,
-        "language": "zh-CN",
-        "value": "zh-CN,zh,en-US,en",
-    }
-    assert controlled["time-zone"] == {
-        "mode": 1,
-        "zone": "(UTC+08:00) Asia/Shanghai",
-        "utc": "Asia/Shanghai",
-        "locale": "zh-CN",
-        "value": 8,
-    }
-    assert controlled["location"] | {"precision": 0} == {
-        "mode": 1,
-        "enable": 1,
-        "longitude": "116.36",
-        "latitude": "39.9",
-        "precision": 0,
-    }
+    for key, value in provider_module.build_virtualbrowser_ip_auto_fingerprint_overrides().items():
+        assert controlled[key] == value
+    assert (controlled["cpu"]["value"], controlled["memory"]["value"]) in provider_module.VIRTUALBROWSER_COMMON_HARDWARE_PROFILES
 
 
 @pytest.mark.asyncio
@@ -522,8 +533,8 @@ async def test_virtualbrowser_create_randomizes_then_applies_minimal_patch(monke
         "ua-language": {"mode": 2, "language": "", "value": ""},
         "time-zone": {"mode": 2, "utc": "", "value": 0},
         "location": {"mode": 2, "enable": 1, "longitude": "0", "latitude": "0", "precision": 3000},
-        "cpu": {"mode": 1, "value": 2},
-        "memory": {"mode": 1, "value": 8},
+        "cpu": {"mode": 1, "value": 8},
+        "memory": {"mode": 1, "value": 16},
         "screen": {"mode": 0, "width": 1920, "height": 1080},
         "speech_voices": {"mode": 1, "value": {}},
     }
@@ -531,22 +542,17 @@ async def test_virtualbrowser_create_randomizes_then_applies_minimal_patch(monke
         "id": 303,
         "chrome_version": 145,
         "ua": {
-            "mode": 1,
-            "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0 Safari/537.36",
+            "mode": 0,
+            "value": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/145.0.0.0 Safari/537.36",
         },
         "ua-full-version": {"mode": 1, "value": "145.0.7632.12"},
-        "ua-language": {"mode": 1, "language": "ja-JP", "value": "ja-JP,ja"},
-        "time-zone": {"mode": 1, "utc": "Asia/Tokyo"},
-        "location": {
-            "mode": 1,
-            "enable": 1,
-            "longitude": "139.6917",
-            "latitude": "35.6895",
-            "precision": 1500,
-        },
+        "ua-language": {"mode": 2},
+        "time-zone": {"mode": 2},
+        "location": {"mode": 2, "enable": 1},
         "cpu": {"mode": 1, "value": 8},
         "memory": {"mode": 1, "value": 16},
-        "screen": {"mode": 1, "width": 1920, "height": 1080},
+        "screen": {"mode": 0, "width": 1920, "height": 1080},
+        "speech_voices": {"mode": 1, "value": {}},
     }
     client = SimpleNamespace(
         add_browser=AsyncMock(return_value=303),
@@ -564,12 +570,8 @@ async def test_virtualbrowser_create_randomizes_then_applies_minimal_patch(monke
 
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
     monkeypatch.setattr(provider_module, "select_virtualbrowser_chrome_version", lambda: 145)
-    monkeypatch.setattr(
-        "src.core.rem.virtualbrowser_fingerprint.secrets.choice",
-        lambda _items: (8, 16),
-    )
 
-    await provider.create(
+    env = await provider.create(
         {
             "env_name": "env-vendor-random",
             "geo": geo,
@@ -581,24 +583,9 @@ async def test_virtualbrowser_create_randomizes_then_applies_minimal_patch(monke
     assert args[3] == {"__randomize_fingerprint__": True, "chrome_version": 145}
     assert kwargs["geo"] is None
     client.randomize_fingerprint.assert_awaited_once_with(303)
-    patch = client.update_browser.await_args.args[1]
-    assert patch["cpu"] == {"mode": 1, "value": 8}
-    assert patch["memory"] == {"mode": 1, "value": 16}
-    assert patch["screen"] == {
-        "mode": 1,
-        "width": 1920,
-        "height": 1080,
-        "_value": "1920 x 1080",
-    }
-    assert "Win64; x64" in patch["ua"]["value"]
-    assert patch["ua-language"] == {"mode": 1, "language": "ja-JP", "value": "ja-JP,ja"}
-    assert patch["time-zone"]["utc"] == "Asia/Tokyo"
-    assert patch["location"]["longitude"] == "139.6917"
-    assert patch["speech_voices"] == provider_module.build_virtualbrowser_speech_voices_override()
-    assert "ua-full-version" not in patch
-    assert "sec-ch-ua" not in patch
-    assert "proxy" not in patch
+    client.update_browser.assert_not_awaited()
     assert client.get_browser_full_parameters.await_count == 2
+    assert env.fingerprint_validation_warnings == []
 
 
 @pytest.mark.asyncio
@@ -611,23 +598,23 @@ async def test_virtualbrowser_update_randomizes_then_applies_minimal_patch(monke
     randomized_parameters = {
         "id": 303,
         "ua": {"mode": 0, "value": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/145.0.0.0"},
-        "cpu": {"mode": 1, "value": 2},
-        "memory": {"mode": 1, "value": 64},
+        "cpu": {"mode": 1, "value": 8},
+        "memory": {"mode": 1, "value": 16},
         "screen": {"mode": 0, "width": 1920, "height": 1080},
         "speech_voices": {"mode": 1, "value": {}},
     }
     final_parameters = {
         "id": 303,
         "chrome_version": 145,
-        "ua": {"mode": 1, "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/145.0.0.0"},
+        "ua": {"mode": 0, "value": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/145.0.0.0"},
         "ua-full-version": {"mode": 1, "value": "145.0.7632.12"},
         "ua-language": {"mode": 2},
         "time-zone": {"mode": 2},
         "location": {"mode": 2, "enable": 1},
         "cpu": {"mode": 1, "value": 8},
         "memory": {"mode": 1, "value": 16},
-        "screen": {"mode": 1, "width": 1920, "height": 1080},
-        "speech_voices": provider_module.build_virtualbrowser_speech_voices_override(),
+        "screen": {"mode": 0, "width": 1920, "height": 1080},
+        "speech_voices": {"mode": 1, "value": {}},
     }
     client = SimpleNamespace(
         randomize_fingerprint=AsyncMock(return_value=True),
@@ -643,18 +630,16 @@ async def test_virtualbrowser_update_randomizes_then_applies_minimal_patch(monke
         handle=BrowserHandle(browser_id="303"),
     )
     monkeypatch.setattr(provider, "_get_api_client", lambda: client)
-    monkeypatch.setattr("src.core.rem.virtualbrowser_fingerprint.secrets.choice", lambda _items: (8, 16))
 
     assert await provider.update(env, {"randomize_fingerprint": True}) is True
 
     client.randomize_fingerprint.assert_awaited_once_with(303)
     patch = client.update_browser.await_args.args[1]
-    assert patch["cpu"] == {"mode": 1, "value": 8}
-    assert patch["memory"] == {"mode": 1, "value": 16}
-    assert patch["screen"]["mode"] == 1
-    assert patch["ua-language"] == {"mode": 2}
-    assert patch["time-zone"] == {"mode": 2}
-    assert patch["location"] == {"mode": 2, "enable": 1}
+    assert patch == {
+        "ua-language": {"mode": 2},
+        "time-zone": {"mode": 2},
+        "location": {"mode": 2, "enable": 1},
+    }
     assert "proxy" not in patch
     assert client.get_browser_full_parameters.await_count == 2
     assert env.fingerprint_validation_warnings == []
@@ -693,11 +678,11 @@ async def test_virtualbrowser_runtime_fingerprint_check_uses_page_visible_values
             return_value={
                 "ua": ua,
                 "uaCh": {"fullVersionList": [{"brand": "Chromium", "version": full_version}]},
-                "language": "ja-JP",
-                "languages": ["ja-JP", "ja"],
-                "timezone": "Asia/Tokyo",
-                "screen": {"width": 1920, "height": 1080},
-                "voices": [{"name": "Google 日本語", "lang": "ja-JP"}],
+                "language": "en-US",
+                "languages": ["en-US", "en"],
+                "timezone": "America/New_York",
+                "screen": {"width": 1366, "height": 768},
+                "voices": [],
                 "webrtc": {"hasRawPrivateAddress": False, "candidateTypes": ["host"]},
             }
         )
@@ -720,10 +705,10 @@ async def test_virtualbrowser_runtime_fingerprint_check_uses_page_visible_values
                 "chrome_version": 145,
                 "ua": {"mode": 0, "value": ua},
                 "ua-full-version": {"mode": 1, "value": full_version},
-                "ua-language": {"mode": 1, "language": "ja-JP", "value": "ja"},
-                "time-zone": {"mode": 1, "utc": "Asia/Tokyo"},
-                "screen": {"mode": 1, "width": 1920, "height": 1080},
-                "speech_voices": {"mode": 1, "value": [{"name": "Google 日本語"}]},
+                "ua-language": {"mode": 2},
+                "time-zone": {"mode": 2},
+                "screen": {"mode": 0, "width": 1920, "height": 1080},
+                "speech_voices": {"mode": 1, "value": {}},
             }
         )
     )
@@ -791,7 +776,6 @@ async def test_virtualbrowser_runtime_fingerprint_check_flags_page_visible_misma
     assert any("navigator.language" in warning for warning in warnings)
     assert any("time-zone" in warning for warning in warnings)
     assert "screen 配置=1920x1080，页面=1366x768，devicePixelRatio=1.25" in warnings
-    assert any("speechSynthesis" in warning for warning in warnings)
     assert any("WebRTC" in warning for warning in warnings)
 
 

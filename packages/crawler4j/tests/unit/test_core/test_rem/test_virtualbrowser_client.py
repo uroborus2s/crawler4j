@@ -576,18 +576,15 @@ async def test_add_browser_strips_legacy_randomize_marker_without_compat_behavio
 
 
 @pytest.mark.asyncio
-async def test_add_browser_passes_proxy_geo_to_fingerprint_materializer(monkeypatch):
+async def test_add_browser_ignores_legacy_geo_for_fingerprint_materializer(monkeypatch):
     client = VirtualBrowserClient(port=9002, api_key="")
     dummy = _DummyHttpClient()
-    seen_geo = None
 
     async def _fake_get_client():
         return dummy
 
-    def _fake_materialize(fingerprint, *, default_chrome_version, geo):  # noqa: ARG001
-        nonlocal seen_geo
-        seen_geo = geo
-        return 145, {"time-zone": {"utc": geo["timezone"]}}
+    def _fake_materialize(fingerprint, *, default_chrome_version):  # noqa: ARG001
+        return 145, {"time-zone": {"mode": 2}}
 
     client._get_client = _fake_get_client  # type: ignore[method-assign]
     monkeypatch.setattr(provider_module, "materialize_virtualbrowser_fingerprint", _fake_materialize)
@@ -602,8 +599,7 @@ async def test_add_browser_passes_proxy_geo_to_fingerprint_materializer(monkeypa
         geo={"country_code": "JP", "timezone": "Asia/Tokyo"},
     )
 
-    assert seen_geo == {"country_code": "JP", "timezone": "Asia/Tokyo"}
-    assert dummy.last_payload["time-zone"] == {"utc": "Asia/Tokyo"}
+    assert dummy.last_payload["time-zone"] == {"mode": 2}
 
 
 @pytest.mark.asyncio

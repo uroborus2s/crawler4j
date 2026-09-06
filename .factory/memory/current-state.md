@@ -1,6 +1,6 @@
 # 当前状态
 
-- 更新时间：2026-08-14
+- 更新时间：2026-09-06
 - 当前阶段：IMPLEMENTATION
 - 当前源码版本：root/runtime `0.4.41`；SDK `0.4.6`；Contracts `0.4.5`（SDK/Contracts 已发布，客户端未发布）
 - 当前协议：Core `0.4.0` / `core-native-v2`
@@ -9,6 +9,7 @@
 
 | ID | 状态 | 下一动作 |
 | --- | --- | --- |
+| `CR-027` / `TASK-049` | `ready_for_commit` | 最终83项回归及独立评审通过，按范围本地提交 |
 | `CR-026` / `TASK-046..048` | `committed` | 有可销毁 HubStudio 环境时补真实 E2E |
 | `CR-025` / `TASK-045` | `released` | PR #58 已合并 main；Contracts 0.4.5 / SDK 0.4.6 已发布 |
 | `CR-024` / `TASK-044` | `committed` | none |
@@ -22,6 +23,7 @@
 
 ## 最近可复用事实
 
+- CR-027 的旧固定上海时区要求已被 2026-09-06 用户指令取代：新建 VirtualBrowser 使用 UA 默认、屏幕跟随电脑、语言/时区/定位跟随 IP，保留CPU/内存组合限制（6/16改4/16），Speech Voices 使用随机模式和空配置对象；不迁移已有环境，不视为目标网站 203 已修复。
 - `@env_candidates` 支持同步/异步 provider 与 `EnvCandidateResult`；同次 JSON-safe context 通过 `TaskContext.candidate_context` 注入 workflow，候选 surface 仅开放 `http.request`，租约后不重跑 provider。
 - 外部模块使用本轮能力的最低版本为 Contracts `0.4.5`、SDK `0.4.6`；两包已发布到 PyPI。
 - 承载本轮 Core 能力的根应用 / 客户端源码版本为 `0.4.41`；root wheel/sdist 已本地构建，未构建桌面资产。
