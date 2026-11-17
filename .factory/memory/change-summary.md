@@ -1,5 +1,7 @@
 # 变更摘要
 
+- 2026-11-17：`0.4.44` 修复宿主误把模块 `TimeoutError` 当成轮询超时而持续等待。真正的宿主截止时间仍走超时取消和回收，模块异常进入任务失败收尾。
+
 更新时间：2026-08-08。这里只保留最近可影响后续工作的变更，不再保存逐条历史日志。
 
 - 2026-08-08：CR-025 为 `@env_candidates` 增加同步/异步单次调用、`EnvCandidateResult` 与 `TaskContext.candidate_context`，候选只读面开放宿主管理的 `http.request`；客户端/Core、Contracts、SDK 版本分别提升到 `0.4.41`、`0.4.5`、`0.4.6`。定向 `320 passed`、integration/acceptance `32 passed`、全量 unit `1287 passed`，三包构建与独立复评通过；PR #58 已合并 main，Contracts / SDK 已发布并通过在线 SHA-256 与 PyPI 隔离安装验证。证据：`.factory/workitems/CR-025/`。
