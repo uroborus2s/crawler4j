@@ -55,6 +55,10 @@ class TaskStopRequested(Exception):
     """任务收到停止请求。"""
 
 
+class _TaskExecutionDeadlineExceeded(TimeoutError):
+    """宿主设定的任务执行期限已到。"""
+
+
 @dataclass
 class ExecutionRequest:
     """ExecutionRunner 的通用输入。"""
@@ -411,7 +415,7 @@ class ExecutionRunner:
                     task.status = TaskStatus.FAILED
 
             self._record_runtime_outcome(task_context, task, result)
-        except asyncio.TimeoutError:
+        except _TaskExecutionDeadlineExceeded:
             logger.error(f"[ATM] Task {task.id} execution timed out")
             task.error = f"Execution Timeout: {request.execution_timeout}s"
             task.message = ""
@@ -772,13 +776,13 @@ class ExecutionRunner:
                     if remaining <= 0:
                         task_context.runtime["_module_cancel_reason"] = "timed_out"
                         await self._cancel_asyncio_task(module_task)
-                        raise asyncio.TimeoutError
+                        raise _TaskExecutionDeadlineExceeded
                     wait_timeout = min(wait_timeout, remaining)
 
                 try:
-                    return await asyncio.wait_for(asyncio.shield(module_task), timeout=wait_timeout)
-                except asyncio.TimeoutError:
-                    continue
+                    completed, _ = await asyncio.wait((module_task,), timeout=wait_timeout)
+                    if completed:
+                        return module_task.result()
                 except asyncio.CancelledError as exc:
                     if task_context.should_stop() or self._is_stop_requested(is_stop_requested):
                         task_context.runtime["_module_cancel_reason"] = "cancelled"

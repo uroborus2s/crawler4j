@@ -419,6 +419,28 @@ async def test_execution_runner_marks_failure_on_module_error():
 
 
 @pytest.mark.asyncio
+async def test_execution_runner_preserves_module_read_timeout_and_releases_environment() -> None:
+    request = _build_request()
+    env, lease = _build_env()
+    module_service = SimpleNamespace(
+        run_module=AsyncMock(side_effect=TimeoutError("The read operation timed out")),
+    )
+    runner, rem = _build_runner(env, lease, module_service)
+    stop_checks = 0
+
+    def stop_if_spinning() -> bool:
+        nonlocal stop_checks
+        stop_checks += 1
+        return stop_checks > 20
+
+    await runner.run(request, is_stop_requested=stop_if_spinning)
+
+    assert request.task.status == TaskStatus.FAILED
+    assert request.task.error == "Execution Error: The read operation timed out"
+    rem.release.assert_awaited_once_with(lease)
+
+
+@pytest.mark.asyncio
 async def test_execution_runner_marks_failure_on_execution_timeout():
     request = _build_request(timeout=1)
     env, lease = _build_env()
